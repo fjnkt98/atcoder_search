@@ -1,0 +1,17 @@
+{
+  "rust-analyzer.linkedProjects": ["./atcoder_search/Cargo.toml"],
+  "rust-analyzer.showUnlinkedFileNotification": false,
+  "sqltools.connections": [
+    {
+      "name": "PostgreSQL",
+      "server": "localhost",
+      "driver": "PostgreSQL",
+      "port": 5432,
+      "database": "atcoder",
+      "username": "atcoder",
+      "askForPassword": false,
+      "password": "atcoder",
+      "connectionTimeout": 15
+    }
+  ]
+}

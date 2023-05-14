@@ -1,4 +1,5 @@
 mod cmd;
+mod pkg;
 
 use crate::cmd::{
     crawl::{self, CrawlArgs},
