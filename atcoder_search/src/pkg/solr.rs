@@ -442,11 +442,10 @@ mod test {
         assert_eq!(status.index.num_docs, 3);
 
         // Test to search document
-        let params = vec![
-            ("q".to_string(), "name:alice".to_string()),
-            ("fl".to_string(), "id,name,gender".to_string()),
-        ];
-        let result = core.select::<Value>(&params).await.unwrap();
+        let result = core
+            .select::<Value>(&[("q", "name:alice"), ("fl", "id,name,gender")])
+            .await
+            .unwrap();
         assert_eq!(result.response.num_found, 1);
         assert_eq!(
             result.response.docs,
