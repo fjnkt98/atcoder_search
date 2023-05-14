@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+  "atcoder_search",
+  "atcoder_search_derive",
+]
