@@ -14,6 +14,7 @@ pub fn impl_expand_field(input: TokenStream) -> TokenStream {
         .iter()
         .map(|field| {
             let ident = &field.ident.to_owned().unwrap();
+            let ty = &field.ty;
             let ident_str = ident.to_string();
             let attrs = &field.attrs;
 
@@ -48,9 +49,15 @@ pub fn impl_expand_field(input: TokenStream) -> TokenStream {
                 .collect::<Vec<_>>();
 
             if suffixes.is_empty() {
-                vec![quote::quote! {
-                    #ident_str: self.#ident,
-                }]
+                if helper::is_contained_by(ty, "DateTime") {
+                    vec![quote::quote! {
+                        #ident_str: self.#ident.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    }]
+                } else {
+                    vec![quote::quote! {
+                        #ident_str: self.#ident,
+                    }]
+                }
             } else {
                 let mut expanded_field_assignations: Vec<TokenStream> = suffixes
                     .iter()
