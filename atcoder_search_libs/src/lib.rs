@@ -2,6 +2,8 @@ pub mod api;
 pub mod indexing;
 pub mod solr;
 
+pub use api::FieldList;
+pub use api::ToQueryParameter;
 pub use atcoder_search_derive::{ExpandField, FieldList};
 pub use indexing::ExpandField;
 
@@ -49,12 +51,7 @@ mod test {
 
     #[test]
     fn test_field_list() {
-        let doc = ResponseDocument {
-            id: 1,
-            title: String::from("my title"),
-            sentence: vec![String::from("foo"), String::from("bar")],
-        };
-        let field_list = doc.field_list();
+        let field_list = ResponseDocument::field_list();
         let expected = "id,title,sentence";
         assert_eq!(field_list, expected);
     }

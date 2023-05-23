@@ -20,7 +20,7 @@ pub fn impl_field_list(input: TokenStream) -> TokenStream {
 
     quote::quote! {
         impl FieldList for #struct_name {
-            fn field_list(&self) -> &'static str {
+            fn field_list() -> &'static str {
                 #field_list
             }
         }

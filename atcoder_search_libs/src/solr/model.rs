@@ -2,8 +2,8 @@ use chrono::{DateTime, FixedOffset, Local, SecondsFormat, Utc};
 use itertools::Itertools;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use serde_with::{serde_as, DeserializeAs, SerializeAs};
-use std::collections::HashMap;
+use serde_with::{DeserializeAs, SerializeAs};
+use std::{collections::BTreeMap, string::ToString};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SolrResponseHeader {
@@ -12,7 +12,7 @@ pub struct SolrResponseHeader {
     pub status: u32,
     #[serde(alias = "QTime")]
     pub qtime: u32,
-    pub params: Option<HashMap<String, Value>>,
+    pub params: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -102,7 +102,7 @@ pub struct SolrCoreList {
     pub header: SolrResponseHeader,
     #[serde(alias = "initFailures")]
     pub init_failures: Value,
-    pub status: Option<HashMap<String, SolrCoreStatus>>,
+    pub status: Option<BTreeMap<String, SolrCoreStatus>>,
     pub error: Option<SolrErrorInfo>,
 }
 
@@ -136,9 +136,9 @@ pub struct SolrSelectBody<T> {
 pub struct SolrFacetBody {
     pub facet_queries: Value,
     #[serde(deserialize_with = "deserialize_facet_fields")]
-    pub facet_fields: HashMap<String, Vec<(String, u32)>>,
+    pub facet_fields: BTreeMap<String, Vec<(String, u32)>>,
     #[serde(deserialize_with = "deserialize_facet_ranges")]
-    pub facet_ranges: HashMap<String, SolrRangeFacetKind>,
+    pub facet_ranges: BTreeMap<String, SolrRangeFacetKind>,
     pub facet_intervals: Value,
     pub facet_heatmaps: Value,
 }
@@ -146,12 +146,12 @@ pub struct SolrFacetBody {
 /// Function to deserialize an array with alternating fields and counts for Rust.
 fn deserialize_facet_fields<'de, D>(
     deserializer: D,
-) -> Result<HashMap<String, Vec<(String, u32)>>, D::Error>
+) -> Result<BTreeMap<String, Vec<(String, u32)>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let value: HashMap<String, Vec<Value>> = Deserialize::deserialize(deserializer)?;
-    let value: HashMap<String, Vec<(String, u32)>> = value
+    let value: BTreeMap<String, Vec<Value>> = Deserialize::deserialize(deserializer)?;
+    let value: BTreeMap<String, Vec<(String, u32)>> = value
         .iter()
         .map(|(k, v)| {
             (
@@ -178,17 +178,17 @@ where
 /// so it was necessary to split the case ad-hoc.
 fn deserialize_facet_ranges<'de, D>(
     deserializer: D,
-) -> Result<HashMap<String, SolrRangeFacetKind>, D::Error>
+) -> Result<BTreeMap<String, SolrRangeFacetKind>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let value: HashMap<String, Value> = Deserialize::deserialize(deserializer)?;
-    let mut result: HashMap<String, SolrRangeFacetKind> = HashMap::new();
+    let value: BTreeMap<String, Value> = Deserialize::deserialize(deserializer)?;
+    let mut result: BTreeMap<String, SolrRangeFacetKind> = BTreeMap::new();
     for (field, value) in value.iter() {
         match &value["start"] {
             Value::Number(start) => {
                 if start.is_i64() {
-                    let value: SolrIntegerRangeFacet = serde_json::from_value(value.clone())
+                    let value: SolrRangeFacet<i64> = serde_json::from_value(value.clone())
                         .map_err(|e| {
                             D::Error::custom(format!(
                                 "Failed to parse integer range facet result. [{}]",
@@ -197,7 +197,7 @@ where
                         })?;
                     result.insert(field.to_string(), SolrRangeFacetKind::Integer(value));
                 } else {
-                    let value: SolrFloatRangeFacet = serde_json::from_value(value.clone())
+                    let value: SolrRangeFacet<f64> = serde_json::from_value(value.clone())
                         .map_err(|e| {
                             D::Error::custom(format!(
                                 "Failed to parse float range facet result. [{}]",
@@ -209,7 +209,7 @@ where
             }
             Value::String(start) => {
                 if DateTime::parse_from_rfc3339(&start.replace("Z", "+00:00")).is_ok() {
-                    let value: SolrDateTimeRangeFacet = serde_json::from_value(value.clone())
+                    let value: SolrRangeFacet<String> = serde_json::from_value(value.clone())
                         .map_err(|e| {
                             D::Error::custom(format!(
                                 "Failed to parse datetime range facet result. [{}]",
@@ -233,57 +233,21 @@ where
 /// Enum of the kind of Solr range facet.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SolrRangeFacetKind {
-    Integer(SolrIntegerRangeFacet),
-    Float(SolrFloatRangeFacet),
-    DateTime(SolrDateTimeRangeFacet),
+    Integer(SolrRangeFacet<i64>),
+    Float(SolrRangeFacet<f64>),
+    DateTime(SolrRangeFacet<String>),
 }
 
-/// Model of the result of integer range facet.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SolrIntegerRangeFacet {
+pub struct SolrRangeFacet<T: Sync + Send + Clone + ToString> {
     #[serde(deserialize_with = "deserialize_range_facet_counts")]
     pub counts: Vec<(String, u32)>,
-    pub gap: i64,
-    pub start: i64,
-    pub end: i64,
-    pub before: Option<i64>,
-    pub after: Option<i64>,
-    pub between: Option<i64>,
-}
-
-/// Model of the result of float range facet.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SolrFloatRangeFacet {
-    #[serde(deserialize_with = "deserialize_range_facet_counts")]
-    pub counts: Vec<(String, u32)>,
-    pub gap: f64,
-    pub start: f64,
-    pub end: f64,
-    pub before: Option<f64>,
-    pub after: Option<f64>,
-    pub between: Option<f64>,
-}
-
-/// Model of the result of datetime range facet.
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SolrDateTimeRangeFacet {
-    #[serde(deserialize_with = "deserialize_range_facet_counts")]
-    pub counts: Vec<(String, u32)>,
-    pub gap: String,
-    #[serde_as(as = "FromSolrDateTime")]
-    pub start: DateTime<FixedOffset>,
-    #[serde_as(as = "FromSolrDateTime")]
-    pub end: DateTime<FixedOffset>,
-    #[serde(default)]
-    #[serde_as(as = "Option<FromSolrDateTime>")]
-    pub before: Option<DateTime<FixedOffset>>,
-    #[serde(default)]
-    #[serde_as(as = "Option<FromSolrDateTime>")]
-    pub after: Option<DateTime<FixedOffset>>,
-    #[serde(default)]
-    #[serde_as(as = "Option<FromSolrDateTime>")]
-    pub between: Option<DateTime<FixedOffset>>,
+    pub start: T,
+    pub end: T,
+    pub gap: T,
+    pub before: Option<u32>,
+    pub after: Option<u32>,
+    pub between: Option<u32>,
 }
 
 /// Function to deserialize an array with alternating fields and counts for Rust.
@@ -309,8 +273,8 @@ where
 /// Model of the `analysis` field in the response JSON of a request to `/solr/<CORE_NAME>/analysis/field`.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SolrAnalysisBody {
-    pub field_types: HashMap<String, SolrAnalysisField>,
-    pub field_names: HashMap<String, SolrAnalysisField>,
+    pub field_types: BTreeMap<String, SolrAnalysisField>,
+    pub field_names: BTreeMap<String, SolrAnalysisField>,
 }
 
 /// Model of the `field_types` or `field_names` field in the response JSON of a request to `/solr/<CORE_NAME>/analysis/field`.
@@ -437,6 +401,7 @@ impl SerializeAs<DateTime<Local>> for IntoSolrDateTime {
 #[cfg(test)]
 mod test {
     use super::*;
+    use serde_with::serde_as;
 
     #[test]
     fn test_deserialize_response_header() {
