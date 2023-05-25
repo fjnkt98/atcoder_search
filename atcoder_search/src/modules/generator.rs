@@ -98,10 +98,10 @@ impl<'a> RecordReader<'a> {
         let stream = sqlx::query_as(
             "
             SELECT
-                problems.problem_id id AS problem_id,
+                problems.problem_id AS problem_id,
                 problems.title AS problem_title,
                 problems.url AS problem_url,
-                contests.problem_id id AS contest_id,
+                contests.contest_id AS contest_id,
                 contests.title AS contest_title,
                 problems.difficulty AS difficulty,
                 contests.start_epoch_second AS start_at,
@@ -111,7 +111,7 @@ impl<'a> RecordReader<'a> {
                 problems.html AS html
             FROM
                 problems
-                JOIN contests ON problems.contest_id = contests.problem_id;
+                JOIN contests ON problems.contest_id = contests.contest_id;
             ",
         )
         .fetch(self.pool);
