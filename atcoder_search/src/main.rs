@@ -14,7 +14,7 @@ use std::{env, str::FromStr};
 use tokio::runtime::Builder;
 use tracing_subscriber::{
     filter::{EnvFilter, LevelFilter},
-    fmt,
+    fmt::{self, time::OffsetTime},
 };
 
 #[derive(Debug, Parser)]
@@ -49,18 +49,15 @@ fn main() {
         .with_level(true)
         .with_target(true)
         .with_ansi(false)
-        .with_thread_ids(true);
+        .with_thread_ids(true)
+        .with_timer(OffsetTime::local_rfc_3339().unwrap());
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .event_format(format)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("failed to set tracing subscriber");
 
-    let runtime = Builder::new_multi_thread()
-        .max_blocking_threads(1)
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
 
     match Cli::parse().command {
         Commands::Crawl(args) => runtime.block_on(crawl::run(args)),
