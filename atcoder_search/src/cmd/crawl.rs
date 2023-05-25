@@ -1,11 +1,12 @@
-use crate::modules::crawler::{ContestCrawler, ProblemCrawler};
+use crate::modules::{
+    crawler::{ContestCrawler, ProblemCrawler},
+    migration::MIGRATOR,
+};
 use anyhow::{Context, Result};
 use clap::Args;
-use sqlx::{migrate::Migrator, postgres::Postgres, Pool};
+use sqlx::{postgres::Postgres, Pool};
 use std::env;
 use tokio::time::Duration;
-
-static MIGRATOR: Migrator = sqlx::migrate!();
 
 #[derive(Debug, Args)]
 pub struct CrawlArgs {

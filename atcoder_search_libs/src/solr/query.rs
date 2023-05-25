@@ -1,6 +1,7 @@
 use core::fmt;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use unicode_normalization::UnicodeNormalization;
 
 /// Regex object for sanitizing the [Solr special characters](https://solr.apache.org/guide/solr/latest/query-guide/standard-query-parser.html#escaping-special-characters).
 pub static SOLR_SPECIAL_CHARACTERS: Lazy<Regex> = Lazy::new(|| {
@@ -8,60 +9,9 @@ pub static SOLR_SPECIAL_CHARACTERS: Lazy<Regex> = Lazy::new(|| {
 });
 
 pub fn sanitize(s: &str) -> String {
-    SOLR_SPECIAL_CHARACTERS.replace_all(s, r"\$0").to_string()
-}
-
-pub trait SolrCommonQueryBuilder {
-    fn sort(&mut self, sort: impl ToString + Sync + Send) -> &mut Self;
-    fn start(&mut self, start: u32) -> &mut Self;
-    fn rows(&mut self, rows: u32) -> &mut Self;
-    fn fq(&mut self, fq: impl ToString + Sync + Send) -> &mut Self;
-    fn fl(&mut self, fl: impl ToString + Sync + Send) -> &mut Self;
-    fn debug(&mut self) -> &mut Self;
-    fn wt(&mut self, wt: impl ToString + Sync + Send) -> &mut Self;
-    fn facet(&mut self, facet: impl FacetQueryParameter) -> &mut Self;
-    fn op(&mut self, op: Operator) -> &mut Self;
-    fn build(self) -> Vec<(String, String)>;
-}
-
-pub trait SolrLuceneQueryBuilder: SolrCommonQueryBuilder {
-    fn q(&mut self, q: impl ToString + Sync + Send) -> &mut Self;
-    fn df(&mut self, df: impl ToString + Sync + Send) -> &mut Self;
-    fn sow(&mut self, sow: bool) -> &mut Self;
-}
-
-pub trait SolrDisMaxQueryBuilder: SolrCommonQueryBuilder {
-    fn q(&mut self, q: impl ToString + Sync + Send) -> &mut Self;
-    fn qf(&mut self, qf: impl ToString + Sync + Send) -> &mut Self;
-    fn qs(&mut self, qs: u32) -> &mut Self;
-    fn pf(&mut self, pf: impl ToString + Sync + Send) -> &mut Self;
-    fn ps(&mut self, ps: u32) -> &mut Self;
-    fn mm(&mut self, mm: impl ToString + Sync + Send) -> &mut Self;
-    fn q_alt(&mut self, q: impl ToString + Sync + Send) -> &mut Self;
-    fn tie(&mut self, tie: f64) -> &mut Self;
-    fn bq(&mut self, bq: impl ToString + Sync + Send) -> &mut Self;
-    fn bf(&mut self, bf: impl ToString + Sync + Send) -> &mut Self;
-}
-
-pub trait SolrEDismaxQueryBuilder: SolrDisMaxQueryBuilder {
-    /// Add `sow` parameter.
-    fn sow(&mut self, sow: bool) -> &mut Self;
-    /// Add `boost` parameter.
-    fn boost(&mut self, boost: impl ToString + Sync + Send) -> &mut Self;
-    /// Add `lowercaseOperators` parameter.
-    fn lowercase_operators(&mut self, flag: bool) -> &mut Self;
-    /// Add `pf2` parameter.
-    fn pf2(&mut self, pf: impl ToString + Sync + Send) -> &mut Self;
-    /// Add `ps2` parameter.
-    fn ps2(&mut self, ps: u32) -> &mut Self;
-    /// Add `pf3` parameter.
-    fn pf3(&mut self, pf: impl ToString + Sync + Send) -> &mut Self;
-    /// Add `ps3` parameter.
-    fn ps3(&mut self, ps: u32) -> &mut Self;
-    /// Add `stopwords` parameter.
-    fn stopwords(&mut self, flag: bool) -> &mut Self;
-    /// Add `uf` parameter.
-    fn uf(&mut self, uf: impl ToString + Sync + Send) -> &mut Self;
+    SOLR_SPECIAL_CHARACTERS
+        .replace_all(&s.nfkc().collect::<String>(), r"\$0")
+        .to_string()
 }
 
 pub trait FacetQueryParameter {
@@ -83,64 +33,61 @@ impl fmt::Display for Operator {
     }
 }
 
-pub struct SolrQueryBuilder {
+pub struct EDisMaxQueryBuilder {
     params: Vec<(String, String)>,
     facet_enable: bool,
 }
 
-impl SolrQueryBuilder {
+impl EDisMaxQueryBuilder {
     pub fn new() -> Self {
         Self {
-            params: vec![],
+            params: vec![(String::from("defType"), String::from("edismax"))],
             facet_enable: false,
         }
     }
-}
-
-impl SolrCommonQueryBuilder for SolrQueryBuilder {
-    fn sort(&mut self, sort: impl ToString + Sync + Send) -> &mut Self {
-        let sort = sort.to_string();
-        if !sort.is_empty() {
-            self.params.push(("sort".to_string(), sort));
-        }
+    pub fn build(self) -> Vec<(String, String)> {
+        self.params
+    }
+    pub fn sort(&mut self, sort: impl ToString + Sync + Send) -> &mut Self {
+        self.params.push(("sort".to_string(), sort.to_string()));
         self
     }
-    fn start(&mut self, start: u32) -> &mut Self {
+    pub fn start(&mut self, start: u32) -> &mut Self {
         self.params.push(("start".to_string(), start.to_string()));
         self
     }
-    fn rows(&mut self, rows: u32) -> &mut Self {
+    pub fn rows(&mut self, rows: u32) -> &mut Self {
         self.params.push(("rows".to_string(), rows.to_string()));
         self
     }
-    fn fq(&mut self, fq: impl ToString + Sync + Send) -> &mut Self {
+    pub fn fq(&mut self, fq: impl ToString + Sync + Send) -> &mut Self {
         let fq = fq.to_string();
         if !fq.is_empty() {
             self.params.push(("fq".to_string(), fq));
         }
         self
     }
-    fn fl(&mut self, fl: impl ToString + Sync + Send) -> &mut Self {
+    pub fn fl(&mut self, fl: impl ToString + Sync + Send) -> &mut Self {
         let fl = fl.to_string();
         if !fl.is_empty() {
             self.params.push(("fl".to_string(), fl));
         }
         self
     }
-    fn debug(&mut self) -> &mut Self {
+    pub fn debug(&mut self) -> &mut Self {
         self.params.push(("debug".to_string(), "all".to_string()));
         self.params
             .push(("debug.explain.structured".to_string(), "true".to_string()));
         self
     }
-    fn wt(&mut self, wt: impl ToString + Sync + Send) -> &mut Self {
+    pub fn wt(&mut self, wt: impl ToString + Sync + Send) -> &mut Self {
         let wt = wt.to_string();
         if !wt.is_empty() {
             self.params.push(("wt".to_string(), wt));
         }
         self
     }
-    fn facet(&mut self, facet: impl FacetQueryParameter) -> &mut Self {
+    pub fn facet(&mut self, facet: impl FacetQueryParameter) -> &mut Self {
         if !self.facet_enable {
             self.params.push(("facet".to_string(), "true".to_string()));
             self.facet_enable = true;
@@ -148,124 +95,122 @@ impl SolrCommonQueryBuilder for SolrQueryBuilder {
         self.params.append(&mut facet.build());
         self
     }
-    fn op(&mut self, op: Operator) -> &mut Self {
+    pub fn op(&mut self, op: Operator) -> &mut Self {
         self.params.push(("q.op".to_string(), op.to_string()));
         self
     }
-    fn build(self) -> Vec<(String, String)> {
-        self.params
+    pub fn df(&mut self, df: impl ToString + Sync + Send) -> &mut Self {
+        let df = df.to_string();
+        if !df.is_empty() {
+            self.params.push(("df".to_string(), df));
+        }
+        self
     }
-}
-
-impl SolrDisMaxQueryBuilder for SolrQueryBuilder {
-    fn q(&mut self, q: impl ToString + Sync + Send) -> &mut Self {
+    pub fn q(&mut self, q: impl ToString + Sync + Send) -> &mut Self {
         let q = q.to_string();
         if !q.is_empty() {
             self.params.push(("q".to_string(), q));
         }
         self
     }
-    fn qf(&mut self, qf: impl ToString + Sync + Send) -> &mut Self {
+    pub fn qf(&mut self, qf: impl ToString + Sync + Send) -> &mut Self {
         let qf = qf.to_string();
         if !qf.is_empty() {
             self.params.push(("qf".to_string(), qf));
         }
         self
     }
-    fn qs(&mut self, qs: u32) -> &mut Self {
+    pub fn qs(&mut self, qs: u32) -> &mut Self {
         self.params.push(("qs".to_string(), qs.to_string()));
         self
     }
-    fn pf(&mut self, pf: impl ToString + Sync + Send) -> &mut Self {
+    pub fn pf(&mut self, pf: impl ToString + Sync + Send) -> &mut Self {
         let pf = pf.to_string();
         if !pf.is_empty() {
             self.params.push(("pf".to_string(), pf));
         }
         self
     }
-    fn ps(&mut self, ps: u32) -> &mut Self {
+    pub fn ps(&mut self, ps: u32) -> &mut Self {
         self.params.push(("ps".to_string(), ps.to_string()));
         self
     }
-    fn mm(&mut self, mm: impl ToString + Sync + Send) -> &mut Self {
+    pub fn mm(&mut self, mm: impl ToString + Sync + Send) -> &mut Self {
         let mm = mm.to_string();
         if !mm.is_empty() {
             self.params.push(("mm".to_string(), mm));
         }
         self
     }
-    fn q_alt(&mut self, q: impl ToString + Sync + Send) -> &mut Self {
+    pub fn q_alt(&mut self, q: impl ToString + Sync + Send) -> &mut Self {
         let q = q.to_string();
         if !q.is_empty() {
             self.params.push(("q.alt".to_string(), q));
         }
         self
     }
-    fn tie(&mut self, tie: f64) -> &mut Self {
+    pub fn tie(&mut self, tie: f64) -> &mut Self {
         self.params.push(("tie".to_string(), tie.to_string()));
         self
     }
-    fn bq(&mut self, bq: impl ToString + Sync + Send) -> &mut Self {
+    pub fn bq(&mut self, bq: impl ToString + Sync + Send) -> &mut Self {
         let bq = bq.to_string();
         if !bq.is_empty() {
             self.params.push(("bq".to_string(), bq));
         }
         self
     }
-    fn bf(&mut self, bf: impl ToString + Sync + Send) -> &mut Self {
+    pub fn bf(&mut self, bf: impl ToString + Sync + Send) -> &mut Self {
         let bf = bf.to_string();
         if !bf.is_empty() {
             self.params.push(("bf".to_string(), bf));
         }
         self
     }
-}
-
-impl SolrEDismaxQueryBuilder for SolrQueryBuilder {
-    fn sow(&mut self, sow: bool) -> &mut Self {
+    pub fn sow(&mut self, sow: bool) -> &mut Self {
         self.params.push(("sow".to_string(), sow.to_string()));
         self
     }
-    fn boost(&mut self, boost: impl ToString + Sync + Send) -> &mut Self {
+    pub fn boost(&mut self, boost: impl ToString + Sync + Send) -> &mut Self {
         let boost = boost.to_string();
         if !boost.is_empty() {
             self.params.push(("boost".to_string(), boost.to_string()));
         }
         self
     }
-    fn lowercase_operators(&mut self, flag: bool) -> &mut Self {
+    pub fn lowercase_operators(&mut self, flag: bool) -> &mut Self {
         self.params
             .push(("lowercaseOperators".to_string(), flag.to_string()));
         self
     }
-    fn pf2(&mut self, pf: impl ToString + Sync + Send) -> &mut Self {
+    pub fn pf2(&mut self, pf: impl ToString + Sync + Send) -> &mut Self {
         let pf = pf.to_string();
         if !pf.is_empty() {
             self.params.push(("pf2".to_string(), pf.to_string()));
         }
         self
     }
-    fn ps2(&mut self, ps: u32) -> &mut Self {
+    pub fn ps2(&mut self, ps: u32) -> &mut Self {
         self.params.push(("ps2".to_string(), ps.to_string()));
         self
     }
-    fn pf3(&mut self, pf: impl ToString + Sync + Send) -> &mut Self {
+    pub fn pf3(&mut self, pf: impl ToString + Sync + Send) -> &mut Self {
         let pf = pf.to_string();
         if !pf.is_empty() {
             self.params.push(("pf3".to_string(), pf.to_string()));
         }
         self
     }
-    fn ps3(&mut self, ps: u32) -> &mut Self {
+    pub fn ps3(&mut self, ps: u32) -> &mut Self {
         self.params.push(("ps3".to_string(), ps.to_string()));
         self
     }
-    fn stopwords(&mut self, flag: bool) -> &mut Self {
+    pub fn stopwords(&mut self, flag: bool) -> &mut Self {
         self.params
             .push(("stopwords".to_string(), flag.to_string()));
         self
     }
-    fn uf(&mut self, uf: impl ToString + Sync + Send) -> &mut Self {
+    pub fn uf(&mut self, uf: impl ToString + Sync + Send) -> &mut Self {
         let uf = uf.to_string();
         if !uf.is_empty() {
             self.params.push(("uf3".to_string(), uf.to_string()));
@@ -582,13 +527,13 @@ mod test {
 
     #[test]
     fn test_with_no_params() {
-        let builder = SolrQueryBuilder::new();
+        let builder = EDisMaxQueryBuilder::new();
         assert!(builder.build().is_empty());
     }
 
     #[test]
     fn test_common_params() {
-        let mut builder = SolrQueryBuilder::new();
+        let mut builder = EDisMaxQueryBuilder::new();
         builder
             .start(10)
             .rows(20)
@@ -627,7 +572,7 @@ mod test {
             .include(RangeFacetIncludeOptions::Lower)
             .other(RangeFacetOtherOptions::All);
 
-        let mut builder = SolrQueryBuilder::new();
+        let mut builder = EDisMaxQueryBuilder::new();
         builder.facet(field_facet).facet(range_facet);
 
         let expected = sorted(

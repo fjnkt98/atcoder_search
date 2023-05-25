@@ -1,9 +1,8 @@
 use crate::modules::models::response::{ResponseDocument, SearchResultResponse};
 use atcoder_search_libs::{
-    solr::parser::{
-        sanitize, FieldFacetQueryParameter, FieldFacetSortOrder, Operator, RangeFacetOtherOptions,
-        RangeFacetQueryParameter, SolrCommonQueryBuilder, SolrDisMaxQueryBuilder,
-        SolrEDismaxQueryBuilder, SolrQueryBuilder,
+    solr::query::{
+        sanitize, EDisMaxQueryBuilder, FieldFacetQueryParameter, FieldFacetSortOrder, Operator,
+        RangeFacetOtherOptions, RangeFacetQueryParameter,
     },
     FieldList, ToQueryParameter,
 };
@@ -79,7 +78,7 @@ impl ToQueryParameter for SearchQueryParameters {
         let page = self.page.unwrap_or(1);
         let start = (page - 1) * rows;
 
-        let mut builder = SolrQueryBuilder::new();
+        let mut builder = EDisMaxQueryBuilder::new();
         builder
             .rows(rows)
             .start(start)
