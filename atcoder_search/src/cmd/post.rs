@@ -3,7 +3,7 @@ use atcoder_search_libs::solr::core::{SolrCore, StandaloneSolrCore};
 use clap::Args;
 use futures::stream::FuturesUnordered;
 use std::{env, ffi::OsString, path::PathBuf, sync::Arc};
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::fs::File;
 use tokio_stream::StreamExt;
 
 #[derive(Debug, Args)]
@@ -74,16 +74,16 @@ pub async fn run(args: PostArgs) -> Result<()> {
 
         let task = tokio::spawn(async move {
             let filename = file.display();
-            let mut file = File::open(&file)
+            let file: File = File::open(&file)
                 .await
                 .expect(&format!("failed to open file {}", filename));
-            let mut buffer = Vec::new();
             let size = file
-                .read_to_end(&mut buffer)
+                .metadata()
                 .await
-                .expect("failed to read file content");
+                .and_then(|metadata| Ok(metadata.len()))
+                .unwrap_or(0);
 
-            match core.post(buffer).await {
+            match core.post(file).await {
                 Ok(_) => {
                     tracing::info!("Post file: {}, size: {} kB", filename, size / 1024)
                 }
