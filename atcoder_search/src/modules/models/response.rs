@@ -1,8 +1,4 @@
-use atcoder_search_libs::{
-    api::{FieldFacetCount, RangeFacetCountKind},
-    solr::model::*,
-    FieldList,
-};
+use atcoder_search_libs::{solr::model::*, FieldList};
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -42,7 +38,7 @@ pub struct SearchResultStats {
     pub pages: u32,
     pub count: u32,
     pub params: Value,
-    pub facet: BTreeMap<String, FacetResultKind>,
+    pub facet: BTreeMap<String, Value>,
 }
 
 #[serde_as]
@@ -60,10 +56,4 @@ pub struct ResponseDocument {
     pub duration: i64,
     pub rate_change: String,
     pub category: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum FacetResultKind {
-    Field(FieldFacetCount),
-    Range(RangeFacetCountKind),
 }

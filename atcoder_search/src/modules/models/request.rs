@@ -1,22 +1,18 @@
 use crate::modules::models::response::{ResponseDocument, SearchResultResponse};
 use atcoder_search_libs::{
-    solr::query::{
-        sanitize, EDisMaxQueryBuilder, FieldFacetQueryParameter, FieldFacetSortOrder, Operator,
-        RangeFacetOtherOptions, RangeFacetQueryParameter,
-    },
+    solr::query::{sanitize, EDisMaxQueryBuilder, Operator},
     FieldList, ToQueryParameter,
 };
-use axum::async_trait;
-use axum::extract::FromRequestParts;
-use axum::http::StatusCode;
-use axum::Json;
+use axum::{async_trait, extract::FromRequestParts, http::StatusCode, Json};
 use http::request::Parts;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashSet;
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
+use serde_json::{json, Value};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashSet},
+};
 use validator::{Validate, ValidationError};
 
 static VALID_SORT_OPTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
@@ -55,6 +51,7 @@ fn validate_facet_fields(values: &str) -> Result<(), ValidationError> {
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq)]
 pub struct SearchQueryParameters {
     #[validate(length(max = 200))]
+    #[serde(deserialize_with = "sanitize_keyword")]
     pub keyword: Option<String>,
     #[validate(range(min = 1, max = 200))]
     pub limit: Option<u32>,
@@ -72,41 +69,47 @@ pub struct SearchQueryParameters {
     pub facet: Option<String>,
 }
 
+fn sanitize_keyword<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = String::deserialize(deserializer)?;
+    Ok(Some(sanitize(&v)))
+}
+
 impl ToQueryParameter for SearchQueryParameters {
     fn to_query(&self) -> Vec<(String, String)> {
         let rows = self.limit.unwrap_or(20);
         let page = self.page.unwrap_or(1);
         let start = (page - 1) * rows;
+        let keyword = self
+            .keyword
+            .as_ref()
+            .and_then(|keyword| Some(Cow::from(keyword)))
+            .unwrap_or(Cow::Borrowed(""));
 
         let mut builder = EDisMaxQueryBuilder::new();
-        builder
+        builder = builder
             .rows(rows)
             .start(start)
             .fl(ResponseDocument::field_list())
+            .q(keyword)
             .qf("text_ja text_en text_1gram")
             .q_alt("*:*")
             .op(Operator::AND)
             .sow(true);
 
-        if let Some(keyword) = &self.keyword {
-            builder.q(sanitize(keyword));
-        }
-
         if let Some(sort) = &self.sort {
             if sort.starts_with("-") {
-                builder.sort(format!("{} desc", &sort[1..]));
+                builder = builder.sort(format!("{} desc", &sort[1..]));
             } else {
-                builder.sort(format!("{} asc", sort));
+                builder = builder.sort(format!("{} asc", sort));
             }
         }
 
         if let Some(categories) = &self.filter_category {
-            let expr = categories
-                .split(',')
-                .into_iter()
-                .map(String::from)
-                .join(" OR ");
-            builder.fq(format!("{{!tag=category}}category:({})", expr));
+            let expr = categories.split(',').into_iter().map(sanitize).join(" OR ");
+            builder = builder.fq(format!("{{!tag=category}}category:({})", expr));
         }
 
         let difficulty_from = self
@@ -118,30 +121,54 @@ impl ToQueryParameter for SearchQueryParameters {
             .and_then(|to| Some(to.to_string()))
             .unwrap_or(String::from("*"));
         if difficulty_from != "*" || difficulty_to != "*" {
-            builder.fq(format!(
+            builder = builder.fq(format!(
                 "{{!tag=difficulty}}difficulty:[{} TO {}}}",
                 difficulty_from, difficulty_to
             ));
         }
 
         if let Some(facet) = &self.facet {
+            let mut facet_params: BTreeMap<&str, Value> = BTreeMap::new();
             for field in facet.split(',') {
                 match field {
                     "category" => {
-                        let mut facet =
-                            FieldFacetQueryParameter::new(format!("{{!ex={}}}{}", field, field));
-                        facet.min_count(0).sort(FieldFacetSortOrder::Index);
-                        builder.facet(facet);
+                        facet_params.insert(
+                            field,
+                            json!({
+                                "type": "terms",
+                                "field": "category",
+                                "limit": -1,
+                                "mincount": 0,
+                                "domain": {
+                                    "excludeTags": ["category"]
+                                }
+                            }),
+                        );
                     }
                     "difficulty" => {
-                        let mut facet = RangeFacetQueryParameter::new(field, 0, 2000, 400);
-                        facet.other(RangeFacetOtherOptions::All);
-                        builder.facet(facet);
+                        facet_params.insert(
+                            field,
+                            json!({
+                                "type": "range",
+                                "field": "difficulty",
+                                "start": 0,
+                                "end": 4000,
+                                "gap": 400,
+                                "other": "all",
+                                "domain": {
+                                    "excludeTags": ["difficulty"]
+                                }
+                            }),
+                        );
                     }
-
                     _ => {}
                 };
             }
+            let facet = serde_json::to_string(&facet_params).unwrap_or_else(|e| {
+                tracing::warn!("failed to serialize json.facet parameters cause: [{:?}]", e);
+                String::new()
+            });
+            builder = builder.facet(facet);
         }
 
         builder.build()
@@ -183,5 +210,18 @@ where
         })?;
 
         Ok(ValidatedSearchQueryParameters(value))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_deserialize() {
+        let query = "keyword=OR";
+        let params: SearchQueryParameters = serde_urlencoded::from_str(query).unwrap();
+
+        assert_eq!(params.keyword, Some(String::from("\\OR")));
     }
 }

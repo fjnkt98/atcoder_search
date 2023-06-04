@@ -1,6 +1,5 @@
 use chrono::{DateTime, FixedOffset, Local, SecondsFormat, Utc};
-use itertools::Itertools;
-use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{DeserializeAs, SerializeAs};
 use std::{collections::BTreeMap, string::ToString};
@@ -114,160 +113,51 @@ pub struct SolrSimpleResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SolrSelectResponse<T> {
+pub struct SolrSelectResponse<D, F> {
     #[serde(alias = "responseHeader")]
     pub header: SolrResponseHeader,
-    pub response: SolrSelectBody<T>,
-    pub facet_counts: Option<SolrFacetBody>,
+    pub response: SolrSelectBody<D>,
+    pub facets: Option<F>,
     pub error: Option<SolrErrorInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SolrSelectBody<T> {
+pub struct SolrSelectBody<D> {
     #[serde(alias = "numFound")]
     pub num_found: u32,
     pub start: u32,
     #[serde(alias = "numFoundExact")]
     pub num_found_exact: bool,
-    pub docs: Vec<T>,
+    pub docs: Vec<D>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SolrFacetBody {
-    pub facet_queries: Value,
-    #[serde(deserialize_with = "deserialize_facet_fields")]
-    pub facet_fields: BTreeMap<String, Vec<(String, u32)>>,
-    #[serde(deserialize_with = "deserialize_facet_ranges")]
-    pub facet_ranges: BTreeMap<String, SolrRangeFacetKind>,
-    pub facet_intervals: Value,
-    pub facet_heatmaps: Value,
-}
-
-/// Function to deserialize an array with alternating fields and counts for Rust.
-fn deserialize_facet_fields<'de, D>(
-    deserializer: D,
-) -> Result<BTreeMap<String, Vec<(String, u32)>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value: BTreeMap<String, Vec<Value>> = Deserialize::deserialize(deserializer)?;
-    let value: BTreeMap<String, Vec<(String, u32)>> = value
-        .iter()
-        .map(|(k, v)| {
-            (
-                k.to_string(),
-                v.iter()
-                    .tuples()
-                    .map(|(v1, v2)| {
-                        (
-                            v1.as_str().unwrap_or("").to_string(),
-                            v2.as_u64().unwrap_or(0) as u32,
-                        )
-                    })
-                    .collect::<Vec<(String, u32)>>(),
-            )
-        })
-        .collect();
-
-    Ok(value)
-}
-
-/// Function to deserialize the result of a range facet.
-///
-/// The type of the result of a range facet depends on the type of the field,
-/// so it was necessary to split the case ad-hoc.
-fn deserialize_facet_ranges<'de, D>(
-    deserializer: D,
-) -> Result<BTreeMap<String, SolrRangeFacetKind>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value: BTreeMap<String, Value> = Deserialize::deserialize(deserializer)?;
-    let mut result: BTreeMap<String, SolrRangeFacetKind> = BTreeMap::new();
-    for (field, value) in value.iter() {
-        match &value["start"] {
-            Value::Number(start) => {
-                if start.is_i64() {
-                    let value: SolrRangeFacet<i64> = serde_json::from_value(value.clone())
-                        .map_err(|e| {
-                            D::Error::custom(format!(
-                                "Failed to parse integer range facet result. [{}]",
-                                e.to_string()
-                            ))
-                        })?;
-                    result.insert(field.to_string(), SolrRangeFacetKind::Integer(value));
-                } else {
-                    let value: SolrRangeFacet<f64> = serde_json::from_value(value.clone())
-                        .map_err(|e| {
-                            D::Error::custom(format!(
-                                "Failed to parse float range facet result. [{}]",
-                                e.to_string()
-                            ))
-                        })?;
-                    result.insert(field.to_string(), SolrRangeFacetKind::Float(value));
-                }
-            }
-            Value::String(start) => {
-                if DateTime::parse_from_rfc3339(&start.replace("Z", "+00:00")).is_ok() {
-                    let value: SolrRangeFacet<String> = serde_json::from_value(value.clone())
-                        .map_err(|e| {
-                            D::Error::custom(format!(
-                                "Failed to parse datetime range facet result. [{}]",
-                                e.to_string()
-                            ))
-                        })?;
-                    result.insert(field.to_string(), SolrRangeFacetKind::DateTime(value));
-                } else {
-                    // TODO: add process if there is a range facet other than numeric of date type.
-                    return Err(D::Error::custom("Unexpected range facet value type."));
-                }
-            }
-            _ => {
-                return Err(D::Error::custom("Mismatched range facet value type."));
-            }
-        }
-    }
-    Ok(result)
-}
-
-/// Enum of the kind of Solr range facet.
-#[derive(Serialize, Deserialize, Debug)]
-pub enum SolrRangeFacetKind {
-    Integer(SolrRangeFacet<i64>),
-    Float(SolrRangeFacet<f64>),
-    DateTime(SolrRangeFacet<String>),
+pub struct Bucket<T> {
+    val: T,
+    count: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SolrRangeFacet<T: Sync + Send + Clone + ToString> {
-    #[serde(deserialize_with = "deserialize_range_facet_counts")]
-    pub counts: Vec<(String, u32)>,
-    pub start: T,
-    pub end: T,
-    pub gap: T,
-    pub before: Option<u32>,
-    pub after: Option<u32>,
-    pub between: Option<u32>,
+pub struct SolrTermFacetCount {
+    buckets: Vec<Bucket<String>>,
 }
 
-/// Function to deserialize an array with alternating fields and counts for Rust.
-fn deserialize_range_facet_counts<'de, D>(deserializer: D) -> Result<Vec<(String, u32)>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value: Vec<Value> = Deserialize::deserialize(deserializer)?;
-    let value: Vec<(String, u32)> = value
-        .iter()
-        .tuples()
-        .map(|(v1, v2)| {
-            (
-                v1.as_str().unwrap_or("").to_string(),
-                v2.as_u64().unwrap_or(0) as u32,
-            )
-        })
-        .collect();
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SolrRangeFacetCount<T> {
+    buckets: Vec<Bucket<T>>,
+    before: Option<SolrRangeFacetCountInfo>,
+    after: Option<SolrRangeFacetCountInfo>,
+    between: Option<SolrRangeFacetCountInfo>,
+}
 
-    Ok(value)
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SolrRangeFacetCountInfo {
+    count: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SolrQueryFacetCount {
+    buckets: Vec<Bucket<String>>,
 }
 
 /// Model of the `analysis` field in the response JSON of a request to `/solr/<CORE_NAME>/analysis/field`.
@@ -739,87 +629,6 @@ mod test {
     }
 
     #[test]
-    fn test_deserialize_facet_counts() {
-        let raw = r#"
-        {
-            "facet_queries": {},
-            "facet_fields": {
-                "category": [
-                    "ABC",
-                    400,
-                    "ARC",
-                    123,
-                    "Other Sponsored",
-                    95,
-                    "AGC",
-                    67,
-                    "Other Contests",
-                    41,
-                    "ABC-Like",
-                    38,
-                    "PAST",
-                    25,
-                    "AGC-Like",
-                    19,
-                    "AHC",
-                    12,
-                    "Marathon",
-                    5,
-                    "ARC-Like",
-                    1
-                ]
-            },
-            "facet_ranges": {
-                "difficulty": {
-                    "counts": [
-                        "0",
-                        210,
-                        "400",
-                        69,
-                        "800",
-                        56,
-                        "1200",
-                        77,
-                        "1600",
-                        74
-                    ],
-                    "gap": 400,
-                    "before": 140,
-                    "after": 200,
-                    "between": 486,
-                    "start": 0,
-                    "end": 2000
-                },
-                "start_at": {
-                    "counts": [
-                        "2021-10-10T00:00:00Z",
-                        19,
-                        "2021-12-10T00:00:00Z",
-                        26,
-                        "2022-02-10T00:00:00Z",
-                        30,
-                        "2022-04-10T00:00:00Z",
-                        15,
-                        "2022-06-10T00:00:00Z",
-                        23,
-                        "2022-08-10T00:00:00Z",
-                        18
-                    ],
-                    "gap": "+2MONTHS",
-                    "start": "2021-10-10T00:00:00Z",
-                    "end": "2022-10-10T00:00:00Z"
-                }
-            },
-            "facet_intervals": {},
-            "facet_heatmaps": {}
-        }
-        "#;
-
-        let facet: SolrFacetBody = serde_json::from_str(raw).unwrap();
-        assert!(facet.facet_fields.contains_key("category"));
-    }
-
-    #[test]
     fn test_deserialize_select_response() {
         let raw = r#"
         {
@@ -836,7 +645,7 @@ mod test {
             }
         }
         "#;
-        let select: SolrSelectResponse<Document> = serde_json::from_str(raw).unwrap();
+        let select: SolrSelectResponse<Document, ()> = serde_json::from_str(raw).unwrap();
         assert_eq!(select.response.num_found, 0);
     }
 }

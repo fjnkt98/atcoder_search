@@ -2,7 +2,7 @@ use crate::solr::model::*;
 use async_trait::async_trait;
 use hyper::header::CONTENT_TYPE;
 use reqwest::{self, Body, Client, Url};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
 use serde_json;
 use thiserror::Error;
 
@@ -27,12 +27,10 @@ pub trait SolrCore {
     async fn ping(&self) -> Result<SolrPingResponse>;
     async fn status(&self) -> Result<SolrCoreStatus>;
     async fn reload(&self) -> Result<SolrSimpleResponse>;
-    async fn select<D>(
+    async fn select<D: DeserializeOwned, F: DeserializeOwned>(
         &self,
         params: &[(impl ToString + Sync, impl ToString + Sync)],
-    ) -> Result<SolrSelectResponse<D>>
-    where
-        D: Serialize + DeserializeOwned;
+    ) -> Result<SolrSelectResponse<D, F>>;
     async fn post<T: Into<Body> + Send>(&self, body: T) -> Result<SolrSimpleResponse>;
     async fn commit(&self) -> Result<()>;
     async fn optimize(&self) -> Result<()>;
@@ -156,13 +154,10 @@ impl SolrCore for StandaloneSolrCore {
         }
     }
 
-    async fn select<D>(
+    async fn select<D: DeserializeOwned, F: DeserializeOwned>(
         &self,
         params: &[(impl ToString + Sync, impl ToString + Sync)],
-    ) -> Result<SolrSelectResponse<D>>
-    where
-        D: Serialize + DeserializeOwned,
-    {
+    ) -> Result<SolrSelectResponse<D, F>> {
         let params: Vec<(String, String)> = params
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -175,7 +170,7 @@ impl SolrCore for StandaloneSolrCore {
             .await?;
         match res.error_for_status_ref() {
             Ok(_) => {
-                let body: SolrSelectResponse<D> = res.json().await?;
+                let body: SolrSelectResponse<D, F> = res.json().await?;
                 Ok(body)
             }
             Err(e) => {
@@ -248,7 +243,7 @@ impl SolrCore for StandaloneSolrCore {
 mod test {
     use super::*;
     use chrono::{DateTime, Utc};
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use serde_json::{self, Value};
 
     #[test]
@@ -354,7 +349,7 @@ mod test {
         let core = StandaloneSolrCore::new("example", "http://localhost:8983").unwrap();
 
         let params = vec![("q".to_string(), "*:*".to_string())];
-        let response = core.select::<Document>(&params).await.unwrap();
+        let response = core.select::<Document, ()>(&params).await.unwrap();
 
         assert_eq!(response.header.status, 0);
     }
@@ -368,7 +363,7 @@ mod test {
         let core = StandaloneSolrCore::new("example", "http://localhost:8983").unwrap();
 
         let params = vec![("q".to_string(), "text_hoge:*".to_string())];
-        let response = core.select::<Document>(&params).await;
+        let response = core.select::<Document, ()>(&params).await;
 
         assert!(response.is_err());
     }
@@ -473,7 +468,7 @@ mod test {
 
         // Test to search document
         let result = core
-            .select::<Value>(&[("q", "name:alice"), ("fl", "id,name,gender")])
+            .select::<Value, ()>(&[("q", "name:alice"), ("fl", "id,name,gender")])
             .await
             .unwrap();
         assert_eq!(result.response.num_found, 1);
