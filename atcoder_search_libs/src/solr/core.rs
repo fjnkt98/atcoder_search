@@ -1,5 +1,6 @@
 use crate::solr::model::*;
 use async_trait::async_trait;
+use hyper::header::CONTENT_TYPE;
 use reqwest::{self, Body, Client, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json;
@@ -17,6 +18,8 @@ pub enum SolrCoreError {
     InvalidUrlError(#[from] url::ParseError),
     #[error("core not found")]
     CoreNotFoundError(String),
+    #[error("{0}")]
+    UnexpectedError(String),
 }
 
 #[async_trait]
@@ -72,8 +75,24 @@ impl StandaloneSolrCore {
 impl SolrCore for StandaloneSolrCore {
     async fn ping(&self) -> Result<SolrPingResponse> {
         let res = self.client.get(self.ping_url.clone()).send().await?;
-        let body: SolrPingResponse = res.json().await?;
-        Ok(body)
+        match res.error_for_status_ref() {
+            Ok(_) => {
+                let body: SolrPingResponse = res.json().await?;
+                Ok(body)
+            }
+            Err(e) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                let msg = body
+                    .error
+                    .and_then(|error| Some(error.msg))
+                    .unwrap_or(String::default());
+                Err(SolrCoreError::UnexpectedError(format!(
+                    "unexpected error [{}] cause [{}]",
+                    e.to_string(),
+                    msg
+                )))
+            }
+        }
     }
 
     async fn status(&self) -> Result<SolrCoreStatus> {
@@ -83,15 +102,31 @@ impl SolrCore for StandaloneSolrCore {
             .query(&[("action", "STATUS"), ("core", &self.name)])
             .send()
             .await?;
-        let core_list: SolrCoreList = res.json().await?;
-        let status = core_list
-            .status
-            .and_then(|status| status.get(&self.name).cloned())
-            .ok_or(SolrCoreError::CoreNotFoundError(String::from(
-                "core not found",
-            )))?;
+        match res.error_for_status_ref() {
+            Ok(_) => {
+                let core_list: SolrCoreList = res.json().await?;
+                let status = core_list
+                    .status
+                    .and_then(|status| status.get(&self.name).cloned())
+                    .ok_or(SolrCoreError::CoreNotFoundError(String::from(
+                        "core not found",
+                    )))?;
 
-        Ok(status)
+                Ok(status)
+            }
+            Err(e) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                let msg = body
+                    .error
+                    .and_then(|error| Some(error.msg))
+                    .unwrap_or(String::default());
+                Err(SolrCoreError::UnexpectedError(format!(
+                    "unexpected error [{}] cause [{}]",
+                    e.to_string(),
+                    msg
+                )))
+            }
+        }
     }
 
     async fn reload(&self) -> Result<SolrSimpleResponse> {
@@ -101,9 +136,24 @@ impl SolrCore for StandaloneSolrCore {
             .query(&[("action", "RELOAD"), ("core", &self.name)])
             .send()
             .await?;
-        let body: SolrSimpleResponse = res.json().await?;
-
-        Ok(body)
+        match res.error_for_status_ref() {
+            Ok(_) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                Ok(body)
+            }
+            Err(e) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                let msg = body
+                    .error
+                    .and_then(|error| Some(error.msg))
+                    .unwrap_or(String::default());
+                Err(SolrCoreError::UnexpectedError(format!(
+                    "unexpected error [{}] cause [{}]",
+                    e.to_string(),
+                    msg
+                )))
+            }
+        }
     }
 
     async fn select<D>(
@@ -123,21 +173,53 @@ impl SolrCore for StandaloneSolrCore {
             .query(&params)
             .send()
             .await?;
-        let body: SolrSelectResponse<D> = res.json().await?;
-
-        Ok(body)
+        match res.error_for_status_ref() {
+            Ok(_) => {
+                let body: SolrSelectResponse<D> = res.json().await?;
+                Ok(body)
+            }
+            Err(e) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                let msg = body
+                    .error
+                    .and_then(|error| Some(error.msg))
+                    .unwrap_or(String::default());
+                Err(SolrCoreError::UnexpectedError(format!(
+                    "unexpected error [{}] cause [{}]",
+                    e.to_string(),
+                    msg
+                )))
+            }
+        }
     }
 
     async fn post<T: Into<Body> + Send>(&self, body: T) -> Result<SolrSimpleResponse> {
         let res = self
             .client
             .post(self.post_url.clone())
+            .header(CONTENT_TYPE, "application/json")
             .body(body)
             .send()
             .await?;
-        let body: SolrSimpleResponse = res.json().await?;
 
-        Ok(body)
+        match res.error_for_status_ref() {
+            Ok(_) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                Ok(body)
+            }
+            Err(e) => {
+                let body: SolrSimpleResponse = res.json().await?;
+                let msg = body
+                    .error
+                    .and_then(|error| Some(error.msg))
+                    .unwrap_or(String::default());
+                Err(SolrCoreError::UnexpectedError(format!(
+                    "unexpected error [{}] cause [{}]",
+                    e.to_string(),
+                    msg
+                )))
+            }
+        }
     }
 
     async fn commit(&self) -> Result<()> {
@@ -331,21 +413,20 @@ mod test {
                 serde_json::json!(
                     {
                         "add-field": [
-                        {
-                            "name": "name",
-                            "type": "string",
-                            "indexed": true,
-                            "stored": true,
-                            "multiValued": false
-                        },
-                        {
-                            "name": "gender",
-                            "type": "string",
-                            "indexed": true,
-                            "stored": true,
-                            "multiValued": false
-                        }
-
+                            {
+                                "name": "name",
+                                "type": "string",
+                                "indexed": true,
+                                "stored": true,
+                                "multiValued": false
+                            },
+                            {
+                                "name": "gender",
+                                "type": "string",
+                                "indexed": true,
+                                "stored": true,
+                                "multiValued": false
+                            }
                         ]
                     }
                 )
@@ -354,6 +435,7 @@ mod test {
             .send()
             .await
             .unwrap();
+
         // Documents for test
         let documents = serde_json::json!(
             [
