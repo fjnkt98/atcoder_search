@@ -1,7 +1,7 @@
 use crate::modules::extractor::FullTextExtractor;
 use anyhow::Result;
 use atcoder_search_libs::ExpandField;
-use chrono::{Local, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use futures::stream::FuturesUnordered;
 use once_cell::sync::Lazy;
 use serde_json::Value;
@@ -42,14 +42,7 @@ impl Record {
         let start_at = Local
             .timestamp_opt(self.start_at, 0)
             .earliest()
-            .and_then(|start_at| {
-                Some(
-                    start_at
-                        .with_timezone(&Utc)
-                        .to_rfc3339_opts(SecondsFormat::Secs, true),
-                )
-            })
-            .unwrap_or(String::from("1970-01-01T00:00:00Z"));
+            .unwrap_or(DateTime::<Utc>::MIN_UTC.with_timezone(&Local));
 
         let document = IndexingDocument {
             problem_id: self.problem_id,
@@ -57,7 +50,7 @@ impl Record {
             problem_url: self.problem_url,
             contest_id: self.contest_id,
             contest_title: self.contest_title,
-            contest_url: contest_url,
+            contest_url,
             difficulty: self.difficulty,
             start_at: start_at,
             duration: self.duration,
@@ -80,11 +73,13 @@ pub struct IndexingDocument {
     pub contest_title: String,
     pub contest_url: String,
     pub difficulty: Option<i32>,
-    pub start_at: String,
+    pub start_at: DateTime<Local>,
     pub duration: i64,
     pub rate_change: String,
     pub category: String,
+    #[suffix(text_ja, text_reading)]
     pub statement_ja: Vec<String>,
+    #[suffix(text_en)]
     pub statement_en: Vec<String>,
 }
 
