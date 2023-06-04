@@ -1,27 +1,20 @@
 use crate::solr::model::*;
 use async_trait::async_trait;
-use hyper::{
-    self, client::HttpConnector, http::uri::InvalidUri, Body, Client, Method, Request, Uri,
-};
+use reqwest::{self, Body, Client, Url};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json;
 use thiserror::Error;
-use url::{self, Url};
 
 type Result<T> = std::result::Result<T, SolrCoreError>;
 
 #[derive(Debug, Error)]
 pub enum SolrCoreError {
     #[error("failed to request to solr core")]
-    RequestError(#[from] hyper::Error),
-    #[error("failed to build request")]
-    RequestBuildError(#[from] hyper::http::Error),
+    RequestError(#[from] reqwest::Error),
     #[error("failed to deserialize JSON data")]
     DeserializeError(#[from] serde_json::Error),
     #[error("invalid Solr url given")]
     InvalidUrlError(#[from] url::ParseError),
-    #[error("invalid uri error")]
-    UriParseError(#[from] InvalidUri),
     #[error("core not found")]
     CoreNotFoundError(String),
 }
@@ -37,7 +30,7 @@ pub trait SolrCore {
     ) -> Result<SolrSelectResponse<D>>
     where
         D: Serialize + DeserializeOwned;
-    async fn post(&self, body: Vec<u8>) -> Result<SolrSimpleResponse>;
+    async fn post<T: Into<Body> + Send>(&self, body: T) -> Result<SolrSimpleResponse>;
     async fn commit(&self) -> Result<()>;
     async fn optimize(&self) -> Result<()>;
     async fn rollback(&self) -> Result<()>;
@@ -46,31 +39,31 @@ pub trait SolrCore {
 
 pub struct StandaloneSolrCore {
     name: String,
-    admin_url: String,
-    ping_url: String,
-    post_url: String,
-    select_url: String,
-    client: Client<HttpConnector>,
+    admin_url: Url,
+    ping_url: Url,
+    post_url: Url,
+    select_url: Url,
+    client: Client,
 }
 
 impl StandaloneSolrCore {
     pub fn new(name: &str, solr_url: &str) -> Result<Self> {
-        let mut solr_url = Url::parse(solr_url).map_err(|e| SolrCoreError::InvalidUrlError(e))?;
+        let mut solr_url = Url::parse(solr_url)?;
         solr_url.set_path("");
-        let base_url = String::from(solr_url.as_str());
-        let admin_url = format!("{}solr/admin/cores", base_url);
-        let ping_url = format!("{}solr/{}/admin/ping", base_url, name);
-        let post_url = format!("{}solr/{}/update", base_url, name);
-        let select_url = format!("{}solr/{}/select", base_url, name);
+        let base_url = solr_url;
+        let admin_url = base_url.join("solr/admin/cores")?;
+        let ping_url = base_url.join(&format!("solr/{}/admin/ping", name))?;
+        let post_url = base_url.join(&format!("solr/{}/update", name))?;
+        let select_url = base_url.join(&format!("solr/{}/select", name))?;
 
         let client = Client::new();
         Ok(StandaloneSolrCore {
             name: String::from(name),
-            admin_url: admin_url,
-            ping_url: ping_url,
-            post_url: post_url,
-            select_url: select_url,
-            client: client,
+            admin_url,
+            ping_url,
+            post_url,
+            select_url,
+            client,
         })
     }
 }
@@ -78,77 +71,39 @@ impl StandaloneSolrCore {
 #[async_trait]
 impl SolrCore for StandaloneSolrCore {
     async fn ping(&self) -> Result<SolrPingResponse> {
-        let uri = self
-            .ping_url
-            .parse::<Uri>()
-            .map_err(|e| SolrCoreError::UriParseError(e))?;
-        let res = self
-            .client
-            .get(uri)
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let body = hyper::body::to_bytes(res.into_body())
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-
-        let result: SolrPingResponse =
-            serde_json::from_slice(&body).map_err(|e| SolrCoreError::DeserializeError(e))?;
-
-        Ok(result)
+        let res = self.client.get(self.ping_url.clone()).send().await?;
+        let body: SolrPingResponse = res.json().await?;
+        Ok(body)
     }
 
     async fn status(&self) -> Result<SolrCoreStatus> {
-        let url = Url::parse_with_params(
-            &self.admin_url,
-            &[("action", "STATUS"), ("core", &self.name)],
-        )
-        .map_err(|e| SolrCoreError::InvalidUrlError(e))?;
-        let uri = url
-            .as_str()
-            .parse::<Uri>()
-            .map_err(|e| SolrCoreError::UriParseError(e))?;
         let res = self
             .client
-            .get(uri)
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let body = hyper::body::to_bytes(res.into_body())
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let core_list: SolrCoreList =
-            serde_json::from_slice(&body).map_err(|e| SolrCoreError::DeserializeError(e))?;
-
-        let result = core_list
+            .get(self.admin_url.clone())
+            .query(&[("action", "STATUS"), ("core", &self.name)])
+            .send()
+            .await?;
+        let core_list: SolrCoreList = res.json().await?;
+        let status = core_list
             .status
             .and_then(|status| status.get(&self.name).cloned())
             .ok_or(SolrCoreError::CoreNotFoundError(String::from(
                 "core not found",
             )))?;
-        Ok(result)
+
+        Ok(status)
     }
 
     async fn reload(&self) -> Result<SolrSimpleResponse> {
-        let url = Url::parse_with_params(
-            &self.admin_url,
-            &[("action", "RELOAD"), ("core", &self.name)],
-        )
-        .map_err(|e| SolrCoreError::InvalidUrlError(e))?;
-        let uri = url
-            .as_str()
-            .parse::<Uri>()
-            .map_err(|e| SolrCoreError::UriParseError(e))?;
         let res = self
             .client
-            .get(uri)
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let body = hyper::body::to_bytes(res.into_body())
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let result: SolrSimpleResponse =
-            serde_json::from_slice(&body).map_err(|e| SolrCoreError::DeserializeError(e))?;
+            .get(self.admin_url.clone())
+            .query(&[("action", "RELOAD"), ("core", &self.name)])
+            .send()
+            .await?;
+        let body: SolrSimpleResponse = res.json().await?;
 
-        Ok(result)
+        Ok(body)
     }
 
     async fn select<D>(
@@ -162,46 +117,27 @@ impl SolrCore for StandaloneSolrCore {
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_string()))
             .collect();
-        let url = Url::parse_with_params(&self.select_url, &params)
-            .map_err(|e| SolrCoreError::InvalidUrlError(e))?;
-        let uri = url
-            .as_str()
-            .parse::<Uri>()
-            .map_err(|e| SolrCoreError::UriParseError(e))?;
         let res = self
             .client
-            .get(uri)
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let body = hyper::body::to_bytes(res.into_body())
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let result: SolrSelectResponse<D> =
-            serde_json::from_slice(&body).map_err(|e| SolrCoreError::DeserializeError(e))?;
+            .get(self.select_url.clone())
+            .query(&params)
+            .send()
+            .await?;
+        let body: SolrSelectResponse<D> = res.json().await?;
 
-        Ok(result)
+        Ok(body)
     }
 
-    async fn post(&self, body: Vec<u8>) -> Result<SolrSimpleResponse> {
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(&self.post_url)
-            .header("Content-Type", "application/json")
-            .body(Body::from(body))
-            .map_err(|e| SolrCoreError::RequestBuildError(e))?;
-
+    async fn post<T: Into<Body> + Send>(&self, body: T) -> Result<SolrSimpleResponse> {
         let res = self
             .client
-            .request(req)
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let body = hyper::body::to_bytes(res.into_body())
-            .await
-            .map_err(|e| SolrCoreError::RequestError(e))?;
-        let result: SolrSimpleResponse =
-            serde_json::from_slice(&body).map_err(|e| SolrCoreError::DeserializeError(e))?;
+            .post(self.post_url.clone())
+            .body(body)
+            .send()
+            .await?;
+        let body: SolrSimpleResponse = res.json().await?;
 
-        Ok(result)
+        Ok(body)
     }
 
     async fn commit(&self) -> Result<()> {
@@ -232,6 +168,28 @@ mod test {
     use chrono::{DateTime, Utc};
     use serde::Deserialize;
     use serde_json::{self, Value};
+
+    #[test]
+    fn create_new_core() {
+        let core = StandaloneSolrCore::new("example", "http://localhost:8983").unwrap();
+
+        assert_eq!(
+            core.admin_url,
+            Url::parse("http://localhost:8983/solr/admin/cores").unwrap()
+        );
+        assert_eq!(
+            core.ping_url,
+            Url::parse("http://localhost:8983/solr/example/admin/ping").unwrap()
+        );
+        assert_eq!(
+            core.post_url,
+            Url::parse("http://localhost:8983/solr/example/update").unwrap()
+        );
+        assert_eq!(
+            core.select_url,
+            Url::parse("http://localhost:8983/solr/example/select").unwrap()
+        );
+    }
 
     /// Normal system test to get core status.
     ///
@@ -366,42 +324,36 @@ mod test {
         let core = StandaloneSolrCore::new("example", "http://localhost:8983").unwrap();
 
         // Define schema for test with Schema API
-        let client = hyper::Client::new();
-        let req = Request::builder()
-            .method(Method::POST)
-            .uri(
-                format!("{}/schema", "http://localhost:8983/solr/example")
-                    .parse::<Uri>()
-                    .unwrap(),
-            )
-            .header("Content-Type", "application/json")
-            .body(Body::from(
+        let client = reqwest::Client::new();
+        client
+            .post(format!("http://localhost:8983/solr/example/schema"))
+            .body(
                 serde_json::json!(
                     {
                         "add-field": [
-                            {
-                                "name": "name",
-                                "type": "string",
-                                "indexed": true,
-                                "stored": true,
-                                "multiValued": false
-                            },
-                            {
-                                "name": "gender",
-                                "type": "string",
-                                "indexed": true,
-                                "stored": true,
-                                "multiValued": false
-                            }
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "indexed": true,
+                            "stored": true,
+                            "multiValued": false
+                        },
+                        {
+                            "name": "gender",
+                            "type": "string",
+                            "indexed": true,
+                            "stored": true,
+                            "multiValued": false
+                        }
+
                         ]
                     }
                 )
                 .to_string(),
-            ))
+            )
+            .send()
+            .await
             .unwrap();
-
-        client.request(req).await.unwrap();
-
         // Documents for test
         let documents = serde_json::json!(
             [
