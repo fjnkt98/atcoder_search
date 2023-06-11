@@ -1,13 +1,9 @@
+use crate::modules::handlers::{liveness, readiness, search_with_qs};
 use anyhow::{Context, Result};
 use atcoder_search_libs::solr::core::{SolrCore, StandaloneSolrCore};
-use axum::{extract::Extension, http::StatusCode, routing, Router, Server};
+use axum::{extract::Extension, routing, Router, Server};
 use clap::Args;
-use hyper::header::CONTENT_TYPE;
 use std::{env, net::SocketAddr, sync::Arc};
-use tower_http::{
-    cors::{AllowOrigin, Any, CorsLayer},
-    services::ServeDir,
-};
 
 #[derive(Debug, Args)]
 pub struct ServerArgs {
@@ -58,19 +54,17 @@ pub async fn run(args: ServerArgs) -> Result<()> {
     Ok(())
 }
 
-fn create_router(core: impl SolrCore + Sync + Send) -> Router {
-    let origin = env::var("FRONTEND_ORIGIN_URL").unwrap_or(String::from("http://localhost:8000"));
-    let service = routing::get_service(ServeDir::new("assets"))
-        .handle_error(|e| async move { (StatusCode::NOT_FOUND, format!("file not found: {}", e)) });
+fn create_router(core: impl SolrCore + Sync + Send + 'static) -> Router {
+    // let origin = env::var("FRONTEND_ORIGIN_URL").unwrap_or(String::from("http://localhost:8000"));
+    // let service = routing::get_service(ServeDir::new("assets"))
+    //     .handle_error(|e| async move { (StatusCode::NOT_FOUND, format!("file not found: {}", e)) });
 
     Router::new()
-        // .route(
-        //     "/api/search",
-        //     routing::get(search_with_qs).post(search_with_json),
-        // )
-        .nest_service("/", service)
-    // .route("/api/healthcheck", routing::get(healthcheck))
-    // .layer(Extension(Arc::new(core)))
+        .route("/api/search", routing::get(search_with_qs))
+        // .nest_service("/", service)
+        .route("/api/liveness", routing::get(liveness))
+        .route("/api/readiness", routing::get(readiness))
+        .layer(Extension(Arc::new(core)))
     // .layer(
     //     CorsLayer::new()
     //         .allow_origin(AllowOrigin::exact(origin.parse().unwrap()))

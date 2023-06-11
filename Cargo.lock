@@ -164,6 +164,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "serde_structuredqs",
  "serde_urlencoded",
  "serde_with",
  "sqlx",
@@ -2171,6 +2172,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7f05c1d5476066defcdfacce1f52fc3cae3af1d3089727100c02ae92e5abbe0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "serde_structuredqs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34392dd6ce02c2e0633db14c02fdad3b0f2ca63f7db22e5ed0c41b93963713e6"
+dependencies = [
+ "form_urlencoded",
+ "itoa",
+ "percent-encoding",
+ "ryu",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -5,7 +5,6 @@ use atcoder_search_libs::{
 };
 use axum::{async_trait, extract::FromRequestParts, http::StatusCode, Json};
 use http::request::Parts;
-use itertools::Itertools;
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
@@ -15,6 +14,7 @@ use std::{
 };
 use validator::{Validate, ValidationError};
 
+// ソート順に指定できるフィールドの集合
 static VALID_SORT_OPTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
     HashSet::from([
         "start_at",
@@ -25,9 +25,30 @@ static VALID_SORT_OPTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
     ])
 });
 
+// 絞り込みに指定できるカテゴリの集合
+static VALID_CATEGORY_OPTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
+    HashSet::from([
+        "ABC",
+        "ARC",
+        "AGC",
+        "AHC",
+        "AGC-Like",
+        "ABC-Like",
+        "ARC-Like",
+        "PAST",
+        "JOI",
+        "JAG",
+        "Marathon",
+        "Other Sponsored",
+        "Other Contests",
+    ])
+});
+
+// ファセットカウントに指定できるフィールドの集合
 static VALID_FACET_FIELDS: Lazy<HashSet<&str>> =
     Lazy::new(|| HashSet::from(["category", "difficulty"]));
 
+// ソート順指定パラメータの値をバリデーションする関数
 fn validate_sort_field(value: &str) -> Result<(), ValidationError> {
     if VALID_SORT_OPTIONS.contains(value) {
         Ok(())
@@ -36,11 +57,23 @@ fn validate_sort_field(value: &str) -> Result<(), ValidationError> {
     }
 }
 
-fn validate_facet_fields(values: &str) -> Result<(), ValidationError> {
+// カテゴリ絞り込みパラメータの値をバリデーションする関数
+fn validate_category_filtering(values: &Vec<String>) -> Result<(), ValidationError> {
     if values
-        .split(',')
-        .into_iter()
-        .all(|value| VALID_FACET_FIELDS.contains(value.trim()))
+        .iter()
+        .all(|value| VALID_CATEGORY_OPTIONS.contains(value.as_str()))
+    {
+        Ok(())
+    } else {
+        Err(ValidationError::new("invalid category field"))
+    }
+}
+
+// ファセットカウント指定パラメータの値をバリデーションする関数
+fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
+    if values
+        .iter()
+        .all(|value| VALID_FACET_FIELDS.contains(value.as_str()))
     {
         Ok(())
     } else {
@@ -48,27 +81,81 @@ fn validate_facet_fields(values: &str) -> Result<(), ValidationError> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct SearchQueryParameters {
     #[validate(length(max = 200))]
-    #[serde(deserialize_with = "sanitize_keyword")]
+    #[serde(default, deserialize_with = "sanitize_keyword", skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
     #[validate(range(min = 1, max = 200))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[validate(range(min = 1))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,
-    #[serde(rename = "filter.category")]
-    pub filter_category: Option<String>,
-    #[serde(rename = "filter.difficulty.from")]
-    pub filter_difficulty_from: Option<u32>,
-    #[serde(rename = "filter.difficulty.to")]
-    pub filter_difficulty_to: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<FilterParameters>,
     #[validate(custom = "validate_sort_field")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
     #[validate(custom = "validate_facet_fields")]
-    pub facet: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "comma_separated_values")]
+    pub facet: Option<Vec<String>>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
+pub struct FilterParameters {
+    #[validate(custom = "validate_category_filtering")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "comma_separated_values")]
+    category: Option<Vec<String>>,
+    difficulty: Option<RangeFilterParameter>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
+pub struct RangeFilterParameter {
+    from: Option<i32>,
+    to: Option<i32>,
+}
+
+impl RangeFilterParameter {
+    pub fn to_range(&self) -> Option<String> {
+        if self.from.is_none() && self.to.is_none() {
+            return None;
+        }
+
+        let from = &self
+            .from
+            .and_then(|from| Some(from.to_string()))
+            .unwrap_or(String::from("*"));
+        let to = &self
+            .to
+            .and_then(|to| Some(to.to_string()))
+            .unwrap_or(String::from("*"));
+        Some(format!("[{} TO {}}}", from, to))
+    }
+}
+
+// カンマ区切りの文字列フィールドをベクタに変換するカスタムデシリアライズ関数
+fn comma_separated_values<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    let values = value
+        .split(',')
+        .into_iter()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(String::from)
+        .collect();
+
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(values))
+    }
+}
+
+// Solrの特殊文字をエスケープする関数
 fn sanitize_keyword<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -88,8 +175,7 @@ impl ToQueryParameter for SearchQueryParameters {
             .and_then(|keyword| Some(Cow::from(keyword)))
             .unwrap_or(Cow::Borrowed(""));
 
-        let mut builder = EDisMaxQueryBuilder::new();
-        builder = builder
+        let mut builder = EDisMaxQueryBuilder::new()
             .rows(rows)
             .start(start)
             .fl(ResponseDocument::field_list())
@@ -97,40 +183,28 @@ impl ToQueryParameter for SearchQueryParameters {
             .qf("text_ja text_en text_1gram")
             .q_alt("*:*")
             .op(Operator::AND)
-            .sow(true);
+            .sow(true)
+            .sort(
+                self.sort
+                    .as_ref()
+                    .and_then(|sort| {
+                        if sort.starts_with("-") {
+                            Some(format!("{} desc", &sort[1..]))
+                        } else {
+                            Some(format!("{} asc", sort))
+                        }
+                    })
+                    .unwrap_or(String::from("")),
+            );
 
-        if let Some(sort) = &self.sort {
-            if sort.starts_with("-") {
-                builder = builder.sort(format!("{} desc", &sort[1..]));
-            } else {
-                builder = builder.sort(format!("{} asc", sort));
-            }
-        }
-
-        if let Some(categories) = &self.filter_category {
-            let expr = categories.split(',').into_iter().map(sanitize).join(" OR ");
-            builder = builder.fq(format!("{{!tag=category}}category:({})", expr));
-        }
-
-        let difficulty_from = self
-            .filter_difficulty_from
-            .and_then(|from| Some(from.to_string()))
-            .unwrap_or(String::from("*"));
-        let difficulty_to = self
-            .filter_difficulty_to
-            .and_then(|to| Some(to.to_string()))
-            .unwrap_or(String::from("*"));
-        if difficulty_from != "*" || difficulty_to != "*" {
-            builder = builder.fq(format!(
-                "{{!tag=difficulty}}difficulty:[{} TO {}}}",
-                difficulty_from, difficulty_to
-            ));
+        if let Some(filter) = &self.filter {
+            builder = builder.fq(&filter.to_query());
         }
 
         if let Some(facet) = &self.facet {
             let mut facet_params: BTreeMap<&str, Value> = BTreeMap::new();
-            for field in facet.split(',') {
-                match field {
+            for field in facet.iter() {
+                match field.as_str() {
                     "category" => {
                         facet_params.insert(
                             field,
@@ -175,6 +249,25 @@ impl ToQueryParameter for SearchQueryParameters {
     }
 }
 
+impl FilterParameters {
+    pub fn to_query(&self) -> Vec<String> {
+        let mut query = vec![];
+        if let Some(categories) = &self.category {
+            query.push(format!(
+                "{{!tag=category}}category:({})",
+                categories.join(" OR ")
+            ));
+        }
+        if let Some(difficulty) = &self.difficulty {
+            if let Some(range) = difficulty.to_range() {
+                query.push(format!("{{!tag=difficulty}}difficulty:{}", range));
+            }
+        }
+
+        query
+    }
+}
+
 pub struct ValidatedSearchQueryParameters<T>(pub T);
 
 #[async_trait]
@@ -187,7 +280,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let query = parts.uri.query().unwrap_or_default();
-        let value: T = serde_urlencoded::from_str(query).map_err(|rejection| {
+        let value: T = serde_structuredqs::from_str(query).map_err(|rejection| {
             tracing::error!("Parsing error: {}", rejection);
             (
                 StatusCode::BAD_REQUEST,
@@ -219,9 +312,39 @@ mod test {
 
     #[test]
     fn test_deserialize() {
-        let query = "keyword=OR";
-        let params: SearchQueryParameters = serde_urlencoded::from_str(query).unwrap();
+        let query = "keyword=OR&facet=category,difficulty&filter.category=ABC,ARC&filter.difficulty.from=800&sort=-score";
+        let params: SearchQueryParameters = serde_structuredqs::from_str(query).unwrap();
 
-        assert_eq!(params.keyword, Some(String::from("\\OR")));
+        let expected = SearchQueryParameters {
+            keyword: Some(String::from("\\OR")),
+            limit: None,
+            page: None,
+            filter: Some(FilterParameters {
+                category: Some(vec![String::from("ABC"), String::from("ARC")]),
+                difficulty: Some(RangeFilterParameter {
+                    from: Some(800),
+                    to: None,
+                }),
+            }),
+            sort: Some(String::from("-score")),
+            facet: Some(vec![String::from("category"), String::from("difficulty")]),
+        };
+
+        assert_eq!(params, expected);
+    }
+
+    #[test]
+    fn empty_query_string() {
+        let params: SearchQueryParameters = serde_structuredqs::from_str("").unwrap();
+        let expected = SearchQueryParameters {
+            keyword: None,
+            limit: None,
+            page: None,
+            filter: None,
+            sort: None,
+            facet: None,
+        };
+
+        assert_eq!(params, expected);
     }
 }

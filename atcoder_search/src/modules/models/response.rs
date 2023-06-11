@@ -3,7 +3,6 @@ use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use serde_with::serde_as;
-use std::collections::BTreeMap;
 
 #[derive(Debug, Serialize)]
 pub struct SearchResultResponse {
@@ -22,7 +21,7 @@ impl SearchResultResponse {
                 pages: 0,
                 count: 0,
                 params: json!(params),
-                facet: BTreeMap::new(),
+                facet: None,
             },
             items: Vec::new(),
             message: Some(message.to_string()),
@@ -38,7 +37,7 @@ pub struct SearchResultStats {
     pub pages: u32,
     pub count: u32,
     pub params: Value,
-    pub facet: BTreeMap<String, Value>,
+    pub facet: Option<FacetCounts>,
 }
 
 #[serde_as]
@@ -56,4 +55,10 @@ pub struct ResponseDocument {
     pub duration: i64,
     pub rate_change: String,
     pub category: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FacetCounts {
+    count: u32,
+    category: Option<SolrTermFacetCount>,
+    difficulty: Option<SolrRangeFacetCount<i32>>,
 }

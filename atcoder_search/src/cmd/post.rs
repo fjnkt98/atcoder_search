@@ -20,25 +20,9 @@ pub async fn run(args: PostArgs) -> Result<()> {
         },
     };
     let solr_host = env::var("SOLR_HOST").unwrap_or_else(|_| {
-                tracing::info!("SOLR_HOST environment variable is not set. Default value `http://localhost` will be used.");
-                String::from("http://localhost")
+                tracing::info!("SOLR_HOST environment variable is not set. Default value `http://localhost:8983` will be used.");
+                String::from("http://localhost:8983")
             });
-    let solr_port = match env::var("SOLR_PORT") {
-        Ok(v) => match v.parse::<u32>() {
-            Ok(port) => port,
-            Err(e) => {
-                tracing::error!("Failed to parse SOLR_PORT into u32. [{}]", e.to_string());
-                anyhow::bail!(e.to_string());
-            }
-        },
-        Err(_) => {
-            tracing::info!(
-                "SOLR_PORT environment variable is not set. Default value `8983` will be used."
-            );
-            8983u32
-        }
-    };
-    let solr_url = format!("{}:{}", solr_host, solr_port);
 
     let core_name = env::var("CORE_NAME").with_context(|| {
         let message = "CORE_NAME must be configured";
@@ -47,7 +31,7 @@ pub async fn run(args: PostArgs) -> Result<()> {
     })?;
 
     let core = Arc::new(
-        StandaloneSolrCore::new(&core_name, &solr_url).with_context(|| {
+        StandaloneSolrCore::new(&core_name, &solr_host).with_context(|| {
             let message = "Failed to create Solr core client";
             tracing::error!(message);
             message

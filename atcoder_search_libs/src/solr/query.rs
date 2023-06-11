@@ -60,10 +60,12 @@ impl EDisMaxQueryBuilder {
         self.params.push(("rows", rows.to_string()));
         self
     }
-    pub fn fq(mut self, fq: impl ToString + Sync + Send) -> Self {
-        let fq = fq.to_string();
-        if !fq.is_empty() {
-            self.params.push(("fq", fq));
+    pub fn fq(mut self, fq: &[impl ToString + Sync + Send]) -> Self {
+        for fq in fq.iter() {
+            let fq = fq.to_string();
+            if !fq.is_empty() {
+                self.params.push(("fq", fq));
+            }
         }
         self
     }
@@ -152,17 +154,21 @@ impl EDisMaxQueryBuilder {
         self.params.push(("tie", tie.to_string()));
         self
     }
-    pub fn bq(mut self, bq: impl ToString + Sync + Send) -> Self {
-        let bq = bq.to_string();
-        if !bq.is_empty() {
-            self.params.push(("bq", bq));
+    pub fn bq(mut self, bq: &[impl ToString + Sync + Send]) -> Self {
+        for bq in bq.iter() {
+            let bq = bq.to_string();
+            if !bq.is_empty() {
+                self.params.push(("bq", bq));
+            }
         }
         self
     }
-    pub fn bf(mut self, bf: impl ToString + Sync + Send) -> Self {
-        let bf = bf.to_string();
-        if !bf.is_empty() {
-            self.params.push(("bf", bf));
+    pub fn bf(mut self, bf: &[impl ToString + Sync + Send]) -> Self {
+        for bf in bf.iter() {
+            let bf = bf.to_string();
+            if !bf.is_empty() {
+                self.params.push(("bf", bf));
+            }
         }
         self
     }
@@ -170,10 +176,12 @@ impl EDisMaxQueryBuilder {
         self.params.push(("sow", sow.to_string()));
         self
     }
-    pub fn boost(mut self, boost: impl ToString + Sync + Send) -> Self {
-        let boost = boost.to_string();
-        if !boost.is_empty() {
-            self.params.push(("boost", boost.to_string()));
+    pub fn boost(mut self, boost: &[impl ToString + Sync + Send]) -> Self {
+        for boost in boost.iter() {
+            let boost = boost.to_string();
+            if !boost.is_empty() {
+                self.params.push(("boost", boost.to_string()));
+            }
         }
         self
     }
@@ -235,8 +243,8 @@ mod test {
         let builder = EDisMaxQueryBuilder::new()
             .start(10)
             .rows(20)
-            .fq("name:alice")
-            .fq("{!collapse field=grade}")
+            .fq(&["name:alice"])
+            .fq(&["{!collapse field=grade}"])
             .fl("id,name,grade");
         let expected = vec![
             ("defType", "edismax"),
