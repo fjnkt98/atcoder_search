@@ -1,4 +1,4 @@
-use crate::modules::extractor::FullTextExtractor;
+use crate::modules::problems::extractor::FullTextExtractor;
 use anyhow::Result;
 use atcoder_search_libs::ExpandField;
 use chrono::{DateTime, Local, TimeZone, Utc};

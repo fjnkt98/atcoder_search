@@ -1,6 +1,9 @@
-use crate::modules::{
-    crawler::{ContestCrawler, ProblemCrawler},
-    migration::MIGRATOR,
+use crate::{
+    cmd::TargetDomain,
+    modules::{
+        migration::MIGRATOR,
+        problems::crawler::{ContestCrawler, ProblemCrawler},
+    },
 };
 use anyhow::{Context, Result};
 use clap::Args;
@@ -10,6 +13,7 @@ use tokio::time::Duration;
 
 #[derive(Debug, Args)]
 pub struct CrawlArgs {
+    domain: TargetDomain,
     #[arg(long)]
     all: bool,
 }
@@ -33,10 +37,17 @@ pub async fn run(args: CrawlArgs) -> Result<()> {
 
     MIGRATOR.run(&pool).await?;
 
-    let crawler = ContestCrawler::new(&pool);
-    crawler.run().await?;
+    match args.domain {
+        TargetDomain::Problems => {
+            let crawler = ContestCrawler::new(&pool);
+            crawler.run().await?;
 
-    let crawler = ProblemCrawler::new(&pool);
-    crawler.run(args.all, Duration::from_millis(1000)).await?;
-    Ok(())
+            let crawler = ProblemCrawler::new(&pool);
+            crawler.run(args.all, Duration::from_millis(1000)).await?;
+            Ok(())
+        }
+        _ => {
+            todo!();
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use crate::modules::generator::DocumentGenerator;
+use crate::modules::problems::generator::DocumentGenerator;
 use anyhow::{Context, Result};
 use clap::Args;
 use sqlx::{postgres::Postgres, Pool};
