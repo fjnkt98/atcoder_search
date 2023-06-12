@@ -50,7 +50,6 @@ pub async fn run(args: ServerArgs) -> Result<()> {
         .await
         .expect("Failed to bind server.");
 
-    println!("start server with {:?}", args);
     Ok(())
 }
 
