@@ -10,7 +10,6 @@ use atcoder_search_libs::{
     ToQueryParameter,
 };
 use axum::{extract::Extension, http::StatusCode, Json};
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use std::sync::Arc;
 use tokio::time::Instant;
 
@@ -40,19 +39,11 @@ pub async fn search_with_qs(
     let index: u32 = (response.response.start / rows) + 1;
     let pages: u32 = (total + rows - 1) / rows;
 
-    {
-        // クエリログのロギング
-        let mut encoded_params = params.clone();
-        encoded_params.keyword = encoded_params
-            .keyword
-            .and_then(|keyword| Some(utf8_percent_encode(&keyword, NON_ALPHANUMERIC).to_string()));
-        tracing::info!(
-            target: "querylog",
-            time=time,
-            hits=response.response.num_found,
-            params=serde_json::to_string(&encoded_params).unwrap_or(String::from(""))
-        );
-    }
+    tracing::info!(
+        target: "querylog",
+        "elapsed_time={} hits={} params={}",
+        time, total, serde_json::to_string(&params).unwrap_or(String::from(""))
+    );
 
     let stats = SearchResultStats {
         time,
