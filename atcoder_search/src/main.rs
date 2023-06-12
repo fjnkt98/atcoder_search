@@ -7,7 +7,7 @@ use crate::cmd::{
     generate::{self, GenerateArgs},
     post::{self, PostArgs},
     server::{self, ServerArgs},
-    updateindex::{self, UpdateIndexArgs},
+    update::{self, UpdateIndexArgs},
 };
 use clap::{Parser, Subcommand};
 use dotenvy::dotenv;
@@ -32,7 +32,7 @@ enum Commands {
     Generate(GenerateArgs),
     Post(PostArgs),
     Server(ServerArgs),
-    UpdateIndex(UpdateIndexArgs),
+    Update(UpdateIndexArgs),
 }
 
 fn main() {
@@ -65,7 +65,7 @@ fn main() {
         Commands::Generate(args) => runtime.block_on(generate::run(args)),
         Commands::Post(args) => runtime.block_on(post::run(args)),
         Commands::Server(args) => runtime.block_on(server::run(args)),
-        Commands::UpdateIndex(args) => runtime.block_on(updateindex::run(args)),
+        Commands::Update(args) => runtime.block_on(update::run(args)),
     }
     .expect("command failed");
 }
