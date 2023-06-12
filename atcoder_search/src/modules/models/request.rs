@@ -8,10 +8,7 @@ use http::request::Parts;
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, HashSet},
-};
+use std::collections::{BTreeMap, HashSet};
 use validator::{Validate, ValidationError};
 
 // ソート順に指定できるフィールドの集合
@@ -84,7 +81,7 @@ fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct SearchQueryParameters {
     #[validate(length(max = 200))]
-    #[serde(default, deserialize_with = "sanitize_keyword", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
     #[validate(range(min = 1, max = 200))]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,21 +95,32 @@ pub struct SearchQueryParameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
     #[validate(custom = "validate_facet_fields")]
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "comma_separated_values")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "comma_separated_values"
+    )]
     pub facet: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct FilterParameters {
     #[validate(custom = "validate_category_filtering")]
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "comma_separated_values")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "comma_separated_values"
+    )]
     category: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     difficulty: Option<RangeFilterParameter>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct RangeFilterParameter {
+    #[serde(skip_serializing_if = "Option::is_none")]
     from: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     to: Option<i32>,
 }
 
@@ -155,15 +163,6 @@ where
     }
 }
 
-// Solrの特殊文字をエスケープする関数
-fn sanitize_keyword<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let v = String::deserialize(deserializer)?;
-    Ok(Some(sanitize(&v)))
-}
-
 impl ToQueryParameter for SearchQueryParameters {
     fn to_query(&self) -> Vec<(String, String)> {
         let rows = self.limit.unwrap_or(20);
@@ -172,80 +171,82 @@ impl ToQueryParameter for SearchQueryParameters {
         let keyword = self
             .keyword
             .as_ref()
-            .and_then(|keyword| Some(Cow::from(keyword)))
-            .unwrap_or(Cow::Borrowed(""));
+            .map(|keyword| sanitize(keyword))
+            .unwrap_or(String::from(""));
+        let sort = self
+            .sort
+            .as_ref()
+            .and_then(|sort| {
+                if sort.starts_with("-") {
+                    Some(format!("{} desc", &sort[1..]))
+                } else {
+                    Some(format!("{} asc", sort))
+                }
+            })
+            .unwrap_or(String::from(""));
+        let fq = self
+            .filter
+            .as_ref()
+            .and_then(|filter| Some(filter.to_query()))
+            .unwrap_or(vec![]);
 
-        let mut builder = EDisMaxQueryBuilder::new()
-            .rows(rows)
-            .start(start)
-            .fl(ResponseDocument::field_list())
-            .q(keyword)
-            .qf("text_ja text_en text_1gram")
-            .q_alt("*:*")
-            .op(Operator::AND)
-            .sow(true)
-            .sort(
-                self.sort
-                    .as_ref()
-                    .and_then(|sort| {
-                        if sort.starts_with("-") {
-                            Some(format!("{} desc", &sort[1..]))
-                        } else {
-                            Some(format!("{} asc", sort))
+        let facet = self
+            .facet
+            .as_ref()
+            .and_then(|facet| {
+                let mut facet_params: BTreeMap<&str, Value> = BTreeMap::new();
+                for field in facet.iter() {
+                    match field.as_str() {
+                        "category" => {
+                            facet_params.insert(
+                                field,
+                                json!({
+                                    "type": "terms",
+                                    "field": "category",
+                                    "limit": -1,
+                                    "mincount": 0,
+                                    "domain": {
+                                        "excludeTags": ["category"]
+                                    }
+                                }),
+                            );
                         }
-                    })
-                    .unwrap_or(String::from("")),
-            );
+                        "difficulty" => {
+                            facet_params.insert(
+                                field,
+                                json!({
+                                    "type": "range",
+                                    "field": "difficulty",
+                                    "start": 0,
+                                    "end": 4000,
+                                    "gap": 400,
+                                    "other": "all",
+                                    "domain": {
+                                        "excludeTags": ["difficulty"]
+                                    }
+                                }),
+                            );
+                        }
+                        _ => {}
+                    };
+                }
+                serde_json::to_string(&facet_params).ok()
+            })
+            .unwrap_or(String::from(""));
 
-        if let Some(filter) = &self.filter {
-            builder = builder.fq(&filter.to_query());
-        }
-
-        if let Some(facet) = &self.facet {
-            let mut facet_params: BTreeMap<&str, Value> = BTreeMap::new();
-            for field in facet.iter() {
-                match field.as_str() {
-                    "category" => {
-                        facet_params.insert(
-                            field,
-                            json!({
-                                "type": "terms",
-                                "field": "category",
-                                "limit": -1,
-                                "mincount": 0,
-                                "domain": {
-                                    "excludeTags": ["category"]
-                                }
-                            }),
-                        );
-                    }
-                    "difficulty" => {
-                        facet_params.insert(
-                            field,
-                            json!({
-                                "type": "range",
-                                "field": "difficulty",
-                                "start": 0,
-                                "end": 4000,
-                                "gap": 400,
-                                "other": "all",
-                                "domain": {
-                                    "excludeTags": ["difficulty"]
-                                }
-                            }),
-                        );
-                    }
-                    _ => {}
-                };
-            }
-            let facet = serde_json::to_string(&facet_params).unwrap_or_else(|e| {
-                tracing::warn!("failed to serialize json.facet parameters cause: [{:?}]", e);
-                String::new()
-            });
-            builder = builder.facet(facet);
-        }
-
-        builder.build()
+        EDisMaxQueryBuilder::new()
+            .facet(facet)
+            .fl(ResponseDocument::field_list())
+            .fq(&fq)
+            .op(Operator::AND)
+            .q(keyword)
+            .q_alt("*:*")
+            .qf("text_ja text_en text_1gram")
+            .rows(rows)
+            .sort(sort)
+            .sow(true)
+            .start(start)
+            .build()
     }
 }
 
