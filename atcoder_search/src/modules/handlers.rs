@@ -25,10 +25,11 @@ pub async fn search_with_qs(
         match core.select(&params.to_query()).await {
             Ok(res) => res,
             Err(e) => {
+                tracing::error!("request failed cause: {:?}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(SearchResultResponse::error(&params, e.to_string())),
-                )
+                    Json(SearchResultResponse::error(&params, "unexpected error")),
+                );
             }
         };
 
