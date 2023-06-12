@@ -1,4 +1,4 @@
-use crate::modules::models::{
+use crate::types::{
     contest::ContestJson,
     problem::{ProblemDifficulty, ProblemJson},
     tables::Contest,

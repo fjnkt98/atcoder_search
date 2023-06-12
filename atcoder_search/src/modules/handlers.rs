@@ -1,4 +1,4 @@
-use crate::modules::models::{
+use crate::types::{
     request::{SearchQueryParameters, ValidatedSearchQueryParameters},
     response::{FacetCounts, ResponseDocument, SearchResultResponse, SearchResultStats},
 };

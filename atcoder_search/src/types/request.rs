@@ -1,4 +1,4 @@
-use crate::modules::models::response::{ResponseDocument, SearchResultResponse};
+use crate::types::response::{ResponseDocument, SearchResultResponse};
 use atcoder_search_libs::{
     solr::query::{sanitize, EDisMaxQueryBuilder, Operator},
     FieldList, ToQueryParameter,
@@ -317,7 +317,7 @@ mod test {
         let params: SearchQueryParameters = serde_structuredqs::from_str(query).unwrap();
 
         let expected = SearchQueryParameters {
-            keyword: Some(String::from("\\OR")),
+            keyword: Some(String::from("OR")),
             limit: None,
             page: None,
             filter: Some(FilterParameters {
