@@ -1,4 +1,9 @@
-use crate::{cmd::TargetDomain, modules::problems::generator::ProblemDocumentGenerator};
+use crate::{
+    cmd::TargetDomain,
+    modules::{
+        problems::generator::ProblemDocumentGenerator, users::generator::UserDocumentGenerator,
+    },
+};
 use anyhow::{Context, Result};
 use clap::Args;
 use sqlx::{postgres::Postgres, Pool};
@@ -78,7 +83,8 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
             generator.run().await
         }
         TargetDomain::Users => {
-            todo!();
+            let generator = UserDocumentGenerator::new(&pool, &save_dir);
+            generator.run().await
         }
         TargetDomain::Recommend => {
             todo!();
