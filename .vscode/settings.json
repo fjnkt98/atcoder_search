@@ -1,5 +1,5 @@
 {
-  "rust-analyzer.linkedProjects": ["./atcoder_search/Cargo.toml"],
+  "rust-analyzer.linkedProjects": ["./backend/atcoder_search/Cargo.toml"],
   "rust-analyzer.showUnlinkedFileNotification": false,
   "sqltools.connections": [
     {

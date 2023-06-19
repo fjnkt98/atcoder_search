@@ -1,7 +1,0 @@
-[workspace]
-
-members = [
-  "atcoder_search",
-  "atcoder_search_derive",
-  "atcoder_search_libs",
-]
