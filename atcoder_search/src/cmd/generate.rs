@@ -1,5 +1,6 @@
 use crate::modules::problems::generator::DocumentGenerator;
 use anyhow::{Context, Result};
+use atcoder_search_libs::GenerateDocument;
 use clap::Args;
 use sqlx::{postgres::Postgres, Pool};
 use std::{env, ffi::OsString, path::PathBuf};
@@ -34,8 +35,8 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
             message
         })?;
 
-    let generator = DocumentGenerator::new(&pool, &save_dir);
-    match generator.truncate().await {
+    let generator = DocumentGenerator::new(&pool);
+    match generator.clean(&save_dir).await {
         Ok(_) => {}
         Err(e) => {
             tracing::error!("failed to delete existing document: {:?}", e);
@@ -43,7 +44,7 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
         }
     };
 
-    match generator.generate(1000).await {
+    match generator.generate(&save_dir, 1000).await {
         Ok(_) => {}
         Err(e) => {
             tracing::error!("failed to generate document: {:?}", e);
