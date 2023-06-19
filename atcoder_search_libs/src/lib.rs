@@ -2,10 +2,9 @@ pub mod api;
 pub mod indexing;
 pub mod solr;
 
-pub use api::FieldList;
-pub use api::ToQueryParameter;
+pub use api::{FieldList, ToQueryParameter};
 pub use atcoder_search_derive::{ExpandField, FieldList};
-pub use indexing::ExpandField;
+pub use indexing::{ExpandField, GenerateDocument, PostDocument, ReadRows, ToDocument};
 
 #[cfg(test)]
 mod test {

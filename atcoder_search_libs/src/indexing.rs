@@ -1,15 +1,18 @@
+use crate::solr::core::SolrCore;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::FuturesUnordered;
 use serde::Serialize;
 use serde_json::Value;
 use std::{
+    ffi::OsString,
     fmt::Debug,
     fs::File,
     io::BufWriter,
     mem,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::Arc,
 };
 use tokio::{
     sync::mpsc::{Receiver, Sender},
@@ -35,8 +38,77 @@ pub trait ToDocument {
     fn to_document(self) -> Result<Self::Document>;
 }
 
+#[async_trait]
 pub trait PostDocument {
-    fn post(&self) -> Result<()>;
+    async fn post_documents<C>(&self, core: C, save_dir: &Path, optimize: bool) -> Result<()>
+    where
+        C: SolrCore + Sync + Send + 'static,
+    {
+        let core = Arc::new(core);
+        let mut files = tokio::fs::read_dir(save_dir).await?;
+
+        let mut tasks: FuturesUnordered<JoinHandle<()>> = FuturesUnordered::new();
+        while let Ok(Some(entry)) = files.next_entry().await {
+            if entry
+                .file_type()
+                .await
+                .and_then(|file_type| Ok(file_type.is_dir()))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let file = entry.path();
+            if file.extension() != Some(OsString::from("json").as_ref()) {
+                continue;
+            }
+
+            let core = core.clone();
+            let task = tokio::spawn(async move {
+                let filename = file.display();
+                let file = match tokio::fs::File::open(&file).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        let message = format!("failed to open the file {} cause {:?}", filename, e);
+                        tracing::error!(message);
+                        panic!("{}", message);
+                    }
+                };
+
+                let size = file
+                    .metadata()
+                    .await
+                    .and_then(|metadata| Ok(metadata.len()))
+                    .unwrap_or(0);
+
+                match core.post(file).await {
+                    Ok(_) => {
+                        tracing::info!("Post the file: {}, size: {} kB", filename, size / 1024)
+                    }
+                    Err(e) => {
+                        let message = format!("failed to post document: {:?}", e);
+                        tracing::error!(message);
+                        panic!("{}", message)
+                    }
+                }
+            });
+            tasks.push(task);
+        }
+
+        while let Some(task) = tasks.next().await {
+            if let Err(e) = task {
+                core.rollback().await?;
+                return Err(anyhow::anyhow!(e));
+            }
+        }
+
+        if optimize {
+            core.optimize().await?;
+        } else {
+            core.commit().await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
