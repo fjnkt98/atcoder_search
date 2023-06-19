@@ -3,6 +3,7 @@ use crate::{
     modules::{
         migration::MIGRATOR,
         problems::crawler::{ContestCrawler, ProblemCrawler},
+        users::crawler::UserCrawler,
     },
 };
 use anyhow::{Context, Result};
@@ -44,6 +45,12 @@ pub async fn run(args: CrawlArgs) -> Result<()> {
 
             let crawler = ProblemCrawler::new(&pool);
             crawler.run(args.all, Duration::from_millis(1000)).await?;
+            Ok(())
+        }
+        TargetDomain::Users => {
+            let crawler = UserCrawler::new(&pool);
+            crawler.crawl().await?;
+
             Ok(())
         }
         _ => {

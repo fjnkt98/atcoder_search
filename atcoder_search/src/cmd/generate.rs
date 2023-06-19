@@ -1,34 +1,18 @@
-use crate::modules::problems::generator::ProblemDocumentGenerator;
+use crate::{cmd::TargetDomain, modules::problems::generator::ProblemDocumentGenerator};
 use anyhow::{Context, Result};
-use clap::{Args, ValueEnum};
+use clap::Args;
 use sqlx::{postgres::Postgres, Pool};
 use std::{
     env,
     ffi::OsString,
-    fmt,
     path::{Path, PathBuf},
 };
 
 #[derive(Debug, Args)]
 pub struct GenerateArgs {
-    domain: Domain,
+    domain: TargetDomain,
     #[arg(long)]
     save_dir: Option<OsString>,
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-enum Domain {
-    Problems,
-    Users,
-}
-
-impl fmt::Display for Domain {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Domain::Problems => write!(f, "problems"),
-            Domain::Users => write!(f, "users"),
-        }
-    }
 }
 
 pub async fn run(args: GenerateArgs) -> Result<()> {
@@ -89,11 +73,14 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
     }
 
     match args.domain {
-        Domain::Problems => {
+        TargetDomain::Problems => {
             let generator = ProblemDocumentGenerator::new(&pool, &save_dir);
             generator.run().await
         }
-        Domain::Users => {
+        TargetDomain::Users => {
+            todo!();
+        }
+        TargetDomain::Recommend => {
             todo!();
         }
     }
