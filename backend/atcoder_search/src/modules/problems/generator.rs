@@ -39,7 +39,7 @@ impl ToDocument for Row {
             .earliest()
             .unwrap_or(DateTime::<Utc>::MIN_UTC.with_timezone(&Local));
 
-        let document = IndexingDocument {
+        let document = ProblemIndex {
             problem_id: self.problem_id,
             problem_title: self.problem_title,
             problem_url: self.problem_url,
@@ -51,8 +51,8 @@ impl ToDocument for Row {
             duration: self.duration,
             rate_change: self.rate_change,
             category: self.category,
-            statement_ja: statement_ja,
-            statement_en: statement_en,
+            statement_ja,
+            statement_en,
         };
 
         Ok(document.expand())
@@ -60,7 +60,7 @@ impl ToDocument for Row {
 }
 
 #[derive(ExpandField)]
-pub struct IndexingDocument {
+pub struct ProblemIndex {
     pub problem_id: String,
     #[suffix(text_ja, text_en)]
     pub problem_title: String,
