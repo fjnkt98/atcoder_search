@@ -111,8 +111,31 @@ pub trait PostDocument {
     }
 }
 
+pub struct DocumentUploader {}
+impl DocumentUploader {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+impl PostDocument for DocumentUploader {}
+
 #[async_trait]
 pub trait GenerateDocument<'a>: ReadRows<'a> {
+    async fn clean(&'a self, save_dir: &Path) -> Result<()> {
+        let mut files = tokio::fs::read_dir(save_dir).await?;
+
+        tracing::info!("Start to delete existing file in {}.", save_dir.display());
+        while let Ok(Some(entry)) = files.next_entry().await {
+            let file = entry.path();
+            if file.extension() == Some(OsString::from("json").as_ref()) {
+                tracing::info!("delete existing file {}", file.display());
+                tokio::fs::remove_file(file).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     async fn generate(&'a self, save_dir: &Path, chunk_size: usize) -> Result<()> {
         let (tx, mut rx): (
             Sender<<<Self as ReadRows>::Row as ToDocument>::Document>,
