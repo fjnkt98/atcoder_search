@@ -5,9 +5,8 @@ use atcoder_search_libs::{ExpandField, GenerateDocument, ReadRows, ToDocument};
 use chrono::{DateTime, Local, TimeZone, Utc};
 use once_cell::sync::Lazy;
 use serde_json::Value;
-use sqlx::postgres::Postgres;
-use sqlx::FromRow;
-use sqlx::Pool;
+use sqlx::{postgres::Postgres, FromRow, Pool};
+use std::path::{Path, PathBuf};
 use tokio::macros::support::Pin;
 use tokio_stream::Stream;
 
@@ -81,18 +80,42 @@ pub struct IndexingDocument {
     pub statement_en: Vec<String>,
 }
 
-pub struct DocumentGenerator<'a> {
+pub struct ProblemDocumentGenerator<'a> {
     pool: &'a Pool<Postgres>,
+    save_dir: PathBuf,
 }
 
-impl<'a> DocumentGenerator<'a> {
-    pub fn new(pool: &'a Pool<Postgres>) -> Self {
-        Self { pool }
+impl<'a> ProblemDocumentGenerator<'a> {
+    pub fn new(pool: &'a Pool<Postgres>, save_dir: &Path) -> Self {
+        Self {
+            pool,
+            save_dir: save_dir.to_owned(),
+        }
+    }
+
+    pub async fn run(&self) -> Result<()> {
+        match self.clean(&self.save_dir).await {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("failed to delete existing document: {:?}", e);
+                return Err(anyhow::anyhow!(e));
+            }
+        };
+
+        match self.generate(&self.save_dir, 1000).await {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("failed to generate document: {:?}", e);
+                return Err(anyhow::anyhow!(e));
+            }
+        };
+
+        Ok(())
     }
 }
 
 #[async_trait]
-impl<'a> ReadRows<'a> for DocumentGenerator<'a> {
+impl<'a> ReadRows<'a> for ProblemDocumentGenerator<'a> {
     type Row = Row;
 
     async fn read_rows(
@@ -125,4 +148,4 @@ impl<'a> ReadRows<'a> for DocumentGenerator<'a> {
 }
 
 #[async_trait]
-impl<'a> GenerateDocument<'a> for DocumentGenerator<'a> {}
+impl<'a> GenerateDocument<'a> for ProblemDocumentGenerator<'a> {}
