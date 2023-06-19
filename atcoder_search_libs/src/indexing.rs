@@ -112,6 +112,11 @@ pub trait PostDocument {
 }
 
 pub struct DocumentUploader {}
+impl DocumentUploader {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 impl PostDocument for DocumentUploader {}
 
 #[async_trait]
