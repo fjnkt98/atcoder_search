@@ -76,10 +76,35 @@ impl<'a> UserCrawler<'a> {
         };
 
         for user in users.iter() {
-            let result = sqlx::query(r#"
+            let result = sqlx::query(
+                r#"
                 MERGE INTO "users"
                 USING
-                    (VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)) AS "user"("user_name", "rating", "highest_rating", "affiliation", "birth_year", "country", "join_count", "rank", "wins")
+                    (
+                        VALUES (
+                            $1::text,
+                            $2::integer,
+                            $3::integer,
+                            $4::text,
+                            $5::integer,
+                            $6::text,
+                            $7::text,
+                            $8::integer,
+                            $9::integer,
+                            $10::integer
+                        )
+                    ) AS "user" (
+                        "user_name",
+                        "rating",
+                        "highest_rating",
+                        "affiliation",
+                        "birth_year",
+                        "country",
+                        "crown",
+                        "join_count",
+                        "rank",
+                        "wins"
+                    )
                 ON
                     "users"."user_name" = "user"."user_name"
                 WHEN MATCHED THEN
@@ -89,6 +114,7 @@ impl<'a> UserCrawler<'a> {
                         "affiliation",
                         "birth_year",
                         "country",
+                        "crown",
                         "join_count",
                         "rank",
                         "wins"
@@ -98,6 +124,7 @@ impl<'a> UserCrawler<'a> {
                         "user"."affiliation",
                         "user"."birth_year",
                         "user"."country",
+                        "user"."crown",
                         "user"."join_count",
                         "user"."rank",
                         "user"."wins"
@@ -110,6 +137,7 @@ impl<'a> UserCrawler<'a> {
                         "affiliation",
                         "birth_year",
                         "country",
+                        "crown",
                         "join_count",
                         "rank",
                         "wins"
@@ -121,23 +149,25 @@ impl<'a> UserCrawler<'a> {
                         "user"."affiliation",
                         "user"."birth_year",
                         "user"."country",
+                        "user"."crown",
                         "user"."join_count",
                         "user"."rank",
                         "user"."wins"
                     );
-                "#)
-                .bind(&user.user_name)
-                .bind(&user.rating)
-                .bind(&user.highest_rating)
-                .bind(&user.affiliation)
-                .bind(&user.birth_year)
-                .bind(&user.country)
-                .bind(&user.crown)
-                .bind(&user.join_count)
-                .bind(&user.rank)
-                .bind(&user.wins)
-                .execute(&mut tx)
-                .await;
+                "#,
+            )
+            .bind(&user.user_name)
+            .bind(&user.rating)
+            .bind(&user.highest_rating)
+            .bind(&user.affiliation)
+            .bind(&user.birth_year)
+            .bind(&user.country)
+            .bind(&user.crown)
+            .bind(&user.join_count)
+            .bind(&user.rank)
+            .bind(&user.wins)
+            .execute(&mut tx)
+            .await;
 
             // エラーが発生したらトランザクションをロールバックしてエラーを早期リターンする
             if let Err(e) = result {
@@ -149,6 +179,7 @@ impl<'a> UserCrawler<'a> {
             }
         }
 
+        tx.commit().await?;
         tracing::info!("Users from {} to {} successfully saved.", first, last);
 
         Ok(())
@@ -157,8 +188,11 @@ impl<'a> UserCrawler<'a> {
     pub async fn crawl(&self) -> Result<()> {
         tracing::info!("Start to crawl active user information");
 
-        let mut i = 1;
+        let mut i = 994;
         while let Ok(users) = self.fetch_page(i).await {
+            if users.is_empty() {
+                break;
+            }
             tracing::info!("Crawl ranking page {}", i);
             self.save(&users).await?;
 
@@ -166,6 +200,7 @@ impl<'a> UserCrawler<'a> {
             i += 1;
         }
 
+        tracing::info!("Finish crawling active user information");
         Ok(())
     }
 }
