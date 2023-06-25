@@ -1,4 +1,4 @@
-use crate::modules::problems::extractor::FullTextExtractor;
+use crate::modules::{problems::extractor::FullTextExtractor, utils::rate_to_color};
 use anyhow::Result;
 use async_trait::async_trait;
 use atcoder_search_libs::{ExpandField, GenerateDocument, ReadRows, ToDocument};
@@ -47,6 +47,9 @@ impl ToDocument for Row {
             contest_id: self.contest_id,
             contest_title: self.contest_title,
             contest_url,
+            color: self
+                .difficulty
+                .and_then(|difficulty| Some(rate_to_color(difficulty))),
             difficulty: self.difficulty,
             is_experimental: self.is_experimental.unwrap_or(false),
             start_at,
@@ -71,6 +74,7 @@ pub struct ProblemIndex {
     #[suffix(text_ja, text_en)]
     pub contest_title: String,
     pub contest_url: String,
+    pub color: Option<String>,
     pub difficulty: Option<i32>,
     pub is_experimental: bool,
     pub start_at: DateTime<Local>,

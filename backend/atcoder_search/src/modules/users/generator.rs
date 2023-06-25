@@ -1,4 +1,4 @@
-use crate::types::tables::User;
+use crate::{modules::utils::rate_to_color, types::tables::User};
 use anyhow::Result;
 use async_trait::async_trait;
 use atcoder_search_libs::{GenerateDocument, ReadRows, ToDocument};
@@ -8,20 +8,16 @@ use std::path::{Path, PathBuf};
 use tokio::macros::support::Pin;
 use tokio_stream::Stream;
 
-fn rate_to_color(rate: i32) -> String {
-    match rate {
-        0..=399 => "gray",
-        400..=799 => "brown",
-        800..=1199 => "green",
-        1200..=1599 => "cyan",
-        1600..=1999 => "blue",
-        2000..=2399 => "yellow",
-        2400..=2799 => "orange",
-        2800..=3199 => "red",
-        3200..=3599 => "silver",
-        _ => "gold",
+fn join_count_grade(join_count: i32) -> String {
+    if join_count < 10 {
+        String::from("    ~  10")
+    } else if join_count < 100 {
+        let c = join_count / 10;
+        format!("{c}0  ~  {c}9", c = c)
+    } else {
+        let c = join_count / 100;
+        format!("{c}00 ~ {c}99", c = c)
     }
-    .to_string()
 }
 
 impl ToDocument for User {
@@ -36,9 +32,7 @@ impl ToDocument for User {
 pub struct UserIndex {
     pub user_name: String,
     pub rating: i32,
-    pub color: String,
     pub highest_rating: i32,
-    pub highest_color: String,
     pub affiliation: Option<String>,
     pub birth_year: Option<i32>,
     pub country: Option<String>,
@@ -46,19 +40,25 @@ pub struct UserIndex {
     pub join_count: i32,
     pub rank: i32,
     pub wins: i32,
+    pub color: String,
+    pub highest_color: String,
+    pub period: Option<String>,
+    pub join_count_grade: String,
 }
 
 impl From<User> for UserIndex {
     fn from(value: User) -> Self {
         let color = rate_to_color(value.rating);
         let highest_color = rate_to_color(value.highest_rating);
+        let period = value
+            .birth_year
+            .and_then(|year| Some(format!("{}0's", year / 10)));
+        let join_count_grade = join_count_grade(value.join_count);
 
         Self {
             user_name: value.user_name,
             rating: value.rating,
-            color,
             highest_rating: value.highest_rating,
-            highest_color,
             affiliation: value.affiliation,
             birth_year: value.birth_year,
             country: value.country,
@@ -66,6 +66,10 @@ impl From<User> for UserIndex {
             join_count: value.join_count,
             rank: value.rank,
             wins: value.wins,
+            color,
+            highest_color,
+            period,
+            join_count_grade,
         }
     }
 }

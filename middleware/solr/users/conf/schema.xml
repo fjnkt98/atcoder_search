@@ -34,9 +34,7 @@
   <uniqueKey>user_name</uniqueKey>
   <field name="user_name" type="TextUniGram" indexed="true" stored="true" required="true" multiValued="false" docValues="false" />
   <field name="rating" type="i32" indexed="true" stored="true" required="true" multiValued="false" docValues="true" />
-  <field name="color" type="String" indexed="true" stored="true" required="true" multiValued="false" docValues="true" />
   <field name="highest_rating" type="i32" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
-  <field name="highest_color" type="String" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
   <field name="affiliation" type="String" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
   <field name="birth_year" type="i32" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
   <field name="country" type="String" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
@@ -44,4 +42,10 @@
   <field name="join_count" type="i32" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
   <field name="rank" type="i32" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
   <field name="wins" type="i32" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
+
+  <!-- facet -->
+  <field name="color" type="String" indexed="true" stored="true" required="true" multiValued="false" docValues="true" />
+  <field name="highest_color" type="String" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
+  <field name="period" type="String" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
+  <field name="join_count_grade" type="String" indexed="true" stored="true" required="false" multiValued="false" docValues="true" />
 </schema>
