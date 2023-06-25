@@ -1,8 +1,7 @@
 use crate::{
     cmd::TargetDomain,
     modules::{
-        migration::MIGRATOR,
-        problems::crawler::{ContestCrawler, ProblemCrawler},
+        problems::crawler::{ContestCrawler, DifficultyCrawler, ProblemCrawler},
         users::crawler::UserCrawler,
     },
 };
@@ -36,8 +35,6 @@ pub async fn run(args: CrawlArgs) -> Result<()> {
             message
         })?;
 
-    MIGRATOR.run(&pool).await?;
-
     match args.domain {
         TargetDomain::Problems => {
             let crawler = ContestCrawler::new(&pool);
@@ -45,6 +42,10 @@ pub async fn run(args: CrawlArgs) -> Result<()> {
 
             let crawler = ProblemCrawler::new(&pool);
             crawler.run(args.all, Duration::from_millis(1000)).await?;
+
+            let crawler = DifficultyCrawler::new(&pool);
+            crawler.run().await?;
+
             Ok(())
         }
         TargetDomain::Users => {

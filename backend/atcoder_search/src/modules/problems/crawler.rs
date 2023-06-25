@@ -88,7 +88,6 @@ impl<'a> ContestCrawler<'a> {
 
         // 各コンテスト情報を一つずつ処理する
         for contest in contests.iter() {
-            tracing::info!("Start to save {} into database...", contest.contest_id);
             let result = sqlx::query("
                 MERGE INTO contests
                 USING
@@ -116,8 +115,6 @@ impl<'a> ContestCrawler<'a> {
                 tx.rollback().await?;
                 anyhow::bail!("an error occurred in transaction: {}", e);
             }
-
-            tracing::info!("Contest {} was saved.", contest.contest_id);
         }
 
         tx.commit().await?;
@@ -206,19 +203,6 @@ impl<'a> ProblemCrawler<'a> {
         Ok(target)
     }
 
-    /// 問題の難易度情報を取得してハッシュマップとして返すメソッド
-    async fn fetch_difficulties(&self) -> Result<HashMap<String, ProblemDifficulty>> {
-        tracing::info!("Attempting to get difficulties from AtCoder Problems...");
-        let res = self
-            .client
-            .get("https://kenkoooo.com/atcoder/resources/problem-models.json")
-            .send()
-            .await?;
-        let difficulties: HashMap<String, ProblemDifficulty> = res.json().await?;
-
-        Ok(difficulties)
-    }
-
     /// 問題データをデータベースに格納するメソッド
     pub async fn save(&self, targets: &Vec<ProblemJson>, duration: Duration) -> Result<()> {
         let config = Cfg {
@@ -236,14 +220,10 @@ impl<'a> ProblemCrawler<'a> {
             minify_css_level_2: false,
             minify_css_level_3: false,
         };
-        let difficulties = self.fetch_difficulties().await?;
 
         for problem in targets.iter() {
             let mut tx = self.pool.begin().await?;
 
-            let difficulty = difficulties
-                .get(&problem.id)
-                .and_then(|difficulty| difficulty.difficulty);
             let url = format!(
                 "https://atcoder.jp/contests/{}/tasks/{}",
                 problem.contest_id, problem.id
@@ -253,14 +233,14 @@ impl<'a> ProblemCrawler<'a> {
             let result = sqlx::query(r"
                 MERGE INTO problems
                 USING
-                    (VALUES($1, $2, $3, $4, $5, $6, $7, $8)) AS problem(problem_id, contest_id, problem_index, name, title, url, html, difficulty)
+                    (VALUES($1, $2, $3, $4, $5, $6, $7)) AS problem(problem_id, contest_id, problem_index, name, title, url, html)
                 ON
                     problems.problem_id = problem.problem_id
                 WHEN MATCHED THEN
-                    UPDATE SET (problem_id, contest_id, problem_index, name, title, url, html, difficulty) = (problem.problem_id, problem.contest_id, problem.problem_index, problem.name, problem.title, problem.url, problem.html, problem.difficulty)
+                    UPDATE SET (problem_id, contest_id, problem_index, name, title, url, html) = (problem.problem_id, problem.contest_id, problem.problem_index, problem.name, problem.title, problem.url, problem.html)
                 WHEN NOT MATCHED THEN
-                    INSERT (problem_id, contest_id, problem_index, name, title, url, html, difficulty)
-                    VALUES (problem.problem_id, problem.contest_id, problem.problem_index, problem.name, problem.title, problem.url, problem.html, problem.difficulty);
+                    INSERT (problem_id, contest_id, problem_index, name, title, url, html)
+                    VALUES (problem.problem_id, problem.contest_id, problem.problem_index, problem.name, problem.title, problem.url, problem.html);
                 ")
                 .bind(&problem.id)
                 .bind(&problem.contest_id)
@@ -269,7 +249,6 @@ impl<'a> ProblemCrawler<'a> {
                 .bind(&problem.title)
                 .bind(&url)
                 .bind(html)
-                .bind(difficulty)
                 .execute(&mut tx)
                 .await;
 
@@ -303,6 +282,114 @@ impl<'a> ProblemCrawler<'a> {
         };
 
         self.save(&targets, duration).await?;
+
+        Ok(())
+    }
+}
+
+pub struct DifficultyCrawler<'a> {
+    url: Url,
+    pool: &'a Pool<Postgres>,
+    client: Client,
+}
+
+impl<'a> DifficultyCrawler<'a> {
+    pub fn new(pool: &'a Pool<Postgres>) -> Self {
+        Self {
+            url: Url::parse("https://kenkoooo.com/atcoder/resources/problem-models.json").unwrap(),
+            pool,
+            client: Client::builder()
+                .gzip(true)
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap(),
+        }
+    }
+
+    /// 問題の難易度情報を取得してハッシュマップとして返すメソッド
+    async fn fetch_difficulties(&self) -> Result<HashMap<String, ProblemDifficulty>> {
+        tracing::info!("Attempting to get difficulties from AtCoder Problems...");
+        let res = self.client.get(self.url.clone()).send().await?;
+        let difficulties: HashMap<String, ProblemDifficulty> = res.json().await?;
+
+        Ok(difficulties)
+    }
+
+    pub async fn save(&self, difficulties: &HashMap<String, ProblemDifficulty>) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        for (problem_id, difficulty) in difficulties.iter() {
+            let result = sqlx::query(
+                r#"
+                MERGE INTO "difficulties"
+                USING
+                    (
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ) AS "difficulty"(
+                        "problem_id", "slope", "intercept", "variance", "difficulty", "discrimination", "irt_loglikelihood", "irt_users", "is_experimental"
+                    )
+                ON
+                    "difficulties"."problem_id" = "difficulty"."problem_id"
+                WHEN MATCHED THEN
+                    UPDATE SET (
+                        "problem_id", "slope", "intercept", "variance", "difficulty", "discrimination", "irt_loglikelihood", "irt_users", "is_experimental"
+                    ) = (
+                        "difficulty"."problem_id",
+                        "difficulty"."slope",
+                        "difficulty"."intercept",
+                        "difficulty"."variance",
+                        "difficulty"."difficulty",
+                        "difficulty"."discrimination",
+                        "difficulty"."irt_loglikelihood",
+                        "difficulty"."irt_users",
+                        "difficulty"."is_experimental"
+                    )
+                WHEN NOT MATCHED THEN
+                    INSERT (
+                        "problem_id", "slope", "intercept", "variance", "difficulty", "discrimination", "irt_loglikelihood", "irt_users", "is_experimental"
+                    )
+                    VALUES (
+                        "difficulty"."problem_id",
+                        "difficulty"."slope",
+                        "difficulty"."intercept",
+                        "difficulty"."variance",
+                        "difficulty"."difficulty",
+                        "difficulty"."discrimination",
+                        "difficulty"."irt_loglikelihood",
+                        "difficulty"."irt_users",
+                        "difficulty"."is_experimental"
+                    );
+            "#,
+            )
+            .bind(&problem_id)
+            .bind(difficulty.slope)
+            .bind(difficulty.intercept)
+            .bind(difficulty.variance)
+            .bind(difficulty.difficulty)
+            .bind(difficulty.discrimination)
+            .bind(difficulty.irt_loglikelihood)
+            .bind(difficulty.irt_users)
+            .bind(difficulty.is_experimental)
+            .execute(&mut tx)
+            .await;
+
+            if let Err(e) = result {
+                let message = format!("an error occurred at saving {}: [{:?}]", problem_id, e);
+                tracing::error!(message);
+                tx.rollback().await?;
+                anyhow::bail!(message);
+            }
+        }
+
+        tx.commit().await?;
+        tracing::info!("{} difficulties successfully saved.", difficulties.len());
+
+        Ok(())
+    }
+
+    pub async fn run(&self) -> Result<()> {
+        let difficulties = self.fetch_difficulties().await?;
+        self.save(&difficulties).await?;
 
         Ok(())
     }

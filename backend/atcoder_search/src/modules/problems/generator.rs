@@ -19,12 +19,13 @@ pub struct Row {
     pub problem_url: String,
     pub contest_id: String,
     pub contest_title: String,
-    pub difficulty: Option<i32>,
     pub start_at: i64,
     pub duration: i64,
     pub rate_change: String,
     pub category: String,
     pub html: String,
+    pub difficulty: Option<i32>,
+    pub is_experimental: Option<bool>,
 }
 
 impl ToDocument for Row {
@@ -47,7 +48,8 @@ impl ToDocument for Row {
             contest_title: self.contest_title,
             contest_url,
             difficulty: self.difficulty,
-            start_at: start_at,
+            is_experimental: self.is_experimental.unwrap_or(false),
+            start_at,
             duration: self.duration,
             rate_change: self.rate_change,
             category: self.category,
@@ -70,6 +72,7 @@ pub struct ProblemIndex {
     pub contest_title: String,
     pub contest_url: String,
     pub difficulty: Option<i32>,
+    pub is_experimental: bool,
     pub start_at: DateTime<Local>,
     pub duration: i64,
     pub rate_change: String,
@@ -123,23 +126,25 @@ impl<'a> ReadRows<'a> for ProblemDocumentGenerator<'a> {
     ) -> Result<Pin<Box<dyn Stream<Item = std::result::Result<Self::Row, sqlx::Error>> + Send + 'a>>>
     {
         let stream = sqlx::query_as(
-            "
+            r#"
             SELECT
-                problems.problem_id AS problem_id,
-                problems.title AS problem_title,
-                problems.url AS problem_url,
-                contests.contest_id AS contest_id,
-                contests.title AS contest_title,
-                problems.difficulty AS difficulty,
-                contests.start_epoch_second AS start_at,
-                contests.duration_second AS duration,
-                contests.rate_change AS rate_change,
-                contests.category AS category,
-                problems.html AS html
+                "problems"."problem_id" AS "problem_id",
+                "problems"."title" AS "problem_title",
+                "problems"."url" AS "problem_url",
+                "contests"."contest_id" AS "contest_id",
+                "contests"."title" AS "contest_title",
+                "contests"."start_epoch_second" AS "start_at",
+                "contests"."duration_second" AS "duration",
+                "contests"."rate_change" AS "rate_change",
+                "contests"."category" AS "category",
+                "problems"."html" AS "html",
+                "difficulties"."difficulty" AS "difficulty",
+                "difficulties"."is_experimental" AS "is_experimental"
             FROM
-                problems
-                JOIN contests ON problems.contest_id = contests.contest_id;
-            ",
+                "problems"
+                JOIN "contests" ON "problems"."contest_id" = "contests"."contest_id"
+                LEFT JOIN "difficulties" ON "problems"."problem_id" = "difficulties"."problem_id"
+            "#,
         )
         .fetch(self.pool);
 
