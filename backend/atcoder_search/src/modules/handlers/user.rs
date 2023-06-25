@@ -351,11 +351,11 @@ pub async fn search_user(
     let index: u32 = (response.response.start / rows) + 1;
     let pages: u32 = (total + rows - 1) / rows;
 
-    // tracing::info!(
-    //     target: "querylog",
-    //     "elapsed_time={} hits={} params={}",
-    //     time, total, serde_json::to_string(&params).unwrap_or(String::from(""))
-    // );
+    tracing::info!(
+        target: "querylog",
+        "domain={} elapsed_time={} hits={} params={}",
+        "user", time, total, serde_json::to_string(&params).unwrap_or(String::from(""))
+    );
 
     let stats = SearchResultStats {
         time,

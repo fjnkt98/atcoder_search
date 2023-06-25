@@ -290,8 +290,8 @@ pub async fn search_problem(
 
     tracing::info!(
         target: "querylog",
-        "elapsed_time={} hits={} params={}",
-        time, total, serde_json::to_string(&params).unwrap_or(String::from(""))
+        "domain={} elapsed_time={} hits={} params={}",
+        "problem", time, total, serde_json::to_string(&params).unwrap_or(String::from(""))
     );
 
     let stats = SearchResultStats {
