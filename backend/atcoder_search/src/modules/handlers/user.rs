@@ -1,8 +1,5 @@
 use atcoder_search_libs::{
-    api::{
-        deserialize_optional_comma_separated, RangeFilterParameter, SearchResultResponse,
-        SearchResultStats,
-    },
+    api::{RangeFilterParameter, SearchResultResponse, SearchResultStats},
     solr::{
         core::{SolrCore, StandaloneSolrCore},
         model::*,
@@ -21,8 +18,9 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use serde_with::skip_serializing_none;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 use tokio::time::Instant;
@@ -52,30 +50,23 @@ fn validate_sort_field(value: &str) -> Result<(), ValidationError> {
     }
 }
 
-static VALID_RANGE_FACET_FIELDS: Lazy<HashSet<&str>> = Lazy::new(|| {
-    HashSet::from([
-        "birth_year",
-        "highest_rating",
-        "join_count",
-        "rank",
-        "rating",
-        "wins",
+// `facet`パラメータに指定できる値 => 実際にファセットカウントに使用するフィールドの名前
+static FACET_FIELDS: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
+    HashMap::from([
+        ("rating", "color"),
+        ("highest_rating", "highest_color"),
+        ("birth_year", "period"),
+        ("join_count", "join_count_grade"),
+        ("affiliation", "affiliation"),
+        ("country", "country"),
+        ("crown", "crown"),
     ])
 });
-static VALID_TERM_FACET_FIELDS: Lazy<HashSet<&str>> =
-    Lazy::new(|| HashSet::from(["color", "highest_color", "affiliation", "country", "crown"]));
-static VALID_FACET_FIELDS: Lazy<HashSet<&str>> = Lazy::new(|| {
-    HashSet::from_iter(
-        VALID_RANGE_FACET_FIELDS
-            .iter()
-            .cloned()
-            .chain(VALID_TERM_FACET_FIELDS.iter().cloned()),
-    )
-});
+
 fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
     if values
         .iter()
-        .all(|value| VALID_FACET_FIELDS.contains(value.as_str()))
+        .all(|value| FACET_FIELDS.contains_key(value.as_str()))
     {
         Ok(())
     } else {
@@ -83,28 +74,19 @@ fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
     }
 }
 
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct UserSearchParameter {
     #[validate(length(max = 200))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
     #[validate(range(min = 1, max = 200))]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[validate(range(min = 1))]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterParameter>,
     #[validate(custom = "validate_sort_field")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
     #[validate(custom = "validate_facet_fields")]
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     pub facet: Option<Vec<String>>,
 }
 
@@ -121,155 +103,84 @@ impl Default for UserSearchParameter {
     }
 }
 
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct FilterParameter {
-    #[serde(skip_serializing_if = "Option::is_none")]
     rating: Option<RangeFilterParameter>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     color: Option<Vec<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     highest_color: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     highest_rating: Option<RangeFilterParameter>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     affiliation: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     birth_year: Option<RangeFilterParameter>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     country: Option<Vec<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     crown: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     join_count: Option<RangeFilterParameter>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     rank: Option<RangeFilterParameter>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     wins: Option<RangeFilterParameter>,
+}
+
+fn term_filtering(
+    field_name: &'static str,
+    value: &Option<Vec<String>>,
+    container: &mut Vec<String>,
+) -> () {
+    if let Some(fq) = value
+        .as_ref()
+        .and_then(|value| {
+            if value.len() == 0 {
+                None
+            } else {
+                Some(value.iter().map(|element| sanitize(element)).join(" OR "))
+            }
+        })
+        .and_then(|expr| {
+            Some(format!(
+                "{{tag!={field_name}}}{field_name}:({expr})",
+                field_name = field_name,
+                expr = expr
+            ))
+        })
+    {
+        container.push(fq)
+    }
+}
+
+fn range_filtering(
+    field_name: &'static str,
+    value: &Option<RangeFilterParameter>,
+    container: &mut Vec<String>,
+) -> () {
+    if let Some(fq) = value
+        .as_ref()
+        .and_then(|value| value.to_range())
+        .and_then(|expr| {
+            Some(format!(
+                "{{!tag={field_name}}}{field_name}:{expr}",
+                field_name = field_name,
+                expr = expr
+            ))
+        })
+    {
+        container.push(fq)
+    }
 }
 
 impl FilterParameter {
     pub fn to_query(&self) -> Vec<String> {
         let mut query = vec![];
 
-        if let Some(fq) = self
-            .rating
-            .as_ref()
-            .and_then(|rating| rating.to_range())
-            .and_then(|rating| Some(format!("{{!tag=rating}}rating:{}", rating)))
-        {
-            query.push(fq);
-        }
-        if let Some(fq) = self.color.as_ref().and_then(|color| {
-            Some(format!(
-                "{{!tag=color}}color:({})",
-                color.iter().map(|color| sanitize(color)).join(" OR ")
-            ))
-        }) {
-            query.push(fq);
-        }
-        if let Some(fq) = self
-            .highest_rating
-            .as_ref()
-            .and_then(|highest_rating| highest_rating.to_range())
-            .and_then(|highest_rating| {
-                Some(format!(
-                    "{{!tag=highest_rating}}highest_rating:{}",
-                    highest_rating
-                ))
-            })
-        {
-            query.push(fq);
-        }
-        if let Some(fq) = self.highest_color.as_ref().and_then(|highest_color| {
-            Some(format!(
-                "{{!tag=highest_color}}highest_color:({})",
-                highest_color
-                    .iter()
-                    .map(|highest_color| sanitize(highest_color))
-                    .join(" OR ")
-            ))
-        }) {
-            query.push(fq);
-        }
-        if let Some(fq) = self.affiliation.as_ref().and_then(|affiliation| {
-            Some(format!(
-                "{{!tag=affiliation}}affiliation:({})",
-                affiliation
-                    .iter()
-                    .map(|affiliation| sanitize(affiliation))
-                    .join(" OR ")
-            ))
-        }) {
-            query.push(fq);
-        }
-        if let Some(fq) = self
-            .birth_year
-            .as_ref()
-            .and_then(|birth_year| birth_year.to_range())
-            .and_then(|birth_year| Some(format!("{{!tag=birth_year}}birth_year:{}", birth_year)))
-        {
-            query.push(fq);
-        }
-        if let Some(fq) = self.country.as_ref().and_then(|country| {
-            Some(format!(
-                "{{!tag=country}}country:({})",
-                country.iter().map(|country| sanitize(country)).join(" OR ")
-            ))
-        }) {
-            query.push(fq);
-        }
-        if let Some(fq) = self.crown.as_ref().and_then(|crown| {
-            Some(format!(
-                "{{!tag=crown}}crown:({})",
-                crown.iter().map(|crown| sanitize(crown)).join(" OR ")
-            ))
-        }) {
-            query.push(fq);
-        }
-        if let Some(fq) = self
-            .join_count
-            .as_ref()
-            .and_then(|join_count| join_count.to_range())
-            .and_then(|join_count| Some(format!("{{!tag=join_count}}join_count:{}", join_count)))
-        {
-            query.push(fq);
-        }
-        if let Some(fq) = self
-            .rank
-            .as_ref()
-            .and_then(|rank| rank.to_range())
-            .and_then(|rank| Some(format!("{{!tag=rank}}rank:{}", rank)))
-        {
-            query.push(fq);
-        }
-        if let Some(fq) = self
-            .wins
-            .as_ref()
-            .and_then(|wins| wins.to_range())
-            .and_then(|wins| Some(format!("{{!tag=wins}}wins:{}", wins)))
-        {
-            query.push(fq);
-        }
+        term_filtering("color", &self.color, &mut query);
+        term_filtering("highest_color", &self.highest_color, &mut query);
+        term_filtering("affiliation", &self.affiliation, &mut query);
+        term_filtering("country", &self.country, &mut query);
+        term_filtering("crown", &self.crown, &mut query);
+
+        range_filtering("rating", &self.rating, &mut query);
+        range_filtering("highest_rating", &self.highest_rating, &mut query);
+        range_filtering("birth_year", &self.birth_year, &mut query);
+        range_filtering("join_count", &self.join_count, &mut query);
+        range_filtering("rank", &self.rank, &mut query);
+        range_filtering("wins", &self.wins, &mut query);
 
         query
     }
@@ -307,29 +218,15 @@ impl ToQuery for UserSearchParameter {
             .and_then(|facet| {
                 let mut facet_params: BTreeMap<&str, Value> = BTreeMap::new();
                 for field in facet.iter() {
-                    if VALID_TERM_FACET_FIELDS.contains(field.as_str()) {
+                    if let Some(facet_field) = FACET_FIELDS.get(field.as_str()) {
                         facet_params.insert(
                             field,
                             json!({
                                 "type": "terms",
-                                "field": field,
+                                "field": facet_field,
                                 "limit": -1,
                                 "mincount": 0,
-                                "domain": {
-                                    "excludeTags": [field]
-                                }
-                            }),
-                        );
-                    } else if VALID_RANGE_FACET_FIELDS.contains(field.as_str()) {
-                        facet_params.insert(
-                            field,
-                            json!({
-                                "type": "range",
-                                "field": field,
-                                "start": 0,
-                                "end": 4000,
-                                "gap": 400,
-                                "other": "all",
+                                "sort": "index",
                                 "domain": {
                                     "excludeTags": [field]
                                 }
@@ -376,7 +273,13 @@ pub struct UserResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FacetCounts {
     count: u32,
-    color: Option<SolrTermFacetCount>,
+    rating: Option<SolrTermFacetCount>,
+    highest_rating: Option<SolrTermFacetCount>,
+    birth_year: Option<SolrTermFacetCount>,
+    join_count: Option<SolrTermFacetCount>,
+    affiliation: Option<SolrTermFacetCount>,
+    country: Option<SolrTermFacetCount>,
+    crown: Option<SolrTermFacetCount>,
 }
 
 pub struct ValidatedUserSearchParameter<T>(pub T);

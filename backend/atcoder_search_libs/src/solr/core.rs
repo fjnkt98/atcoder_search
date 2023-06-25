@@ -38,6 +38,7 @@ pub trait SolrCore {
     async fn truncate(&self) -> Result<()>;
 }
 
+#[derive(Clone, Debug)]
 pub struct StandaloneSolrCore {
     name: String,
     admin_url: Url,

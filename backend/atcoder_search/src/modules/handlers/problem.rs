@@ -1,8 +1,5 @@
 use atcoder_search_libs::{
-    api::{
-        deserialize_optional_comma_separated, RangeFilterParameter, SearchResultResponse,
-        SearchResultStats,
-    },
+    api::{RangeFilterParameter, SearchResultResponse, SearchResultStats},
     solr::{
         core::{SolrCore, StandaloneSolrCore},
         model::*,
@@ -22,9 +19,9 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use serde_with::serde_as;
+use serde_with::{serde_as, skip_serializing_none};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 use tokio::time::Instant;
@@ -41,29 +38,6 @@ static VALID_SORT_OPTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
     ])
 });
 
-// 絞り込みに指定できるカテゴリの集合
-static VALID_CATEGORY_OPTIONS: Lazy<HashSet<&str>> = Lazy::new(|| {
-    HashSet::from([
-        "ABC",
-        "ARC",
-        "AGC",
-        "AHC",
-        "AGC-Like",
-        "ABC-Like",
-        "ARC-Like",
-        "PAST",
-        "JOI",
-        "JAG",
-        "Marathon",
-        "Other Sponsored",
-        "Other Contests",
-    ])
-});
-
-// ファセットカウントに指定できるフィールドの集合
-static VALID_FACET_FIELDS: Lazy<HashSet<&str>> =
-    Lazy::new(|| HashSet::from(["category", "difficulty"]));
-
 // ソート順指定パラメータの値をバリデーションする関数
 fn validate_sort_field(value: &str) -> Result<(), ValidationError> {
     if VALID_SORT_OPTIONS.contains(value) {
@@ -73,23 +47,15 @@ fn validate_sort_field(value: &str) -> Result<(), ValidationError> {
     }
 }
 
-// カテゴリ絞り込みパラメータの値をバリデーションする関数
-fn validate_category_filtering(values: &Vec<String>) -> Result<(), ValidationError> {
-    if values
-        .iter()
-        .all(|value| VALID_CATEGORY_OPTIONS.contains(value.as_str()))
-    {
-        Ok(())
-    } else {
-        Err(ValidationError::new("invalid category field"))
-    }
-}
+// `facet`パラメータに指定できる値 => 実際にファセットカウントに使用するフィールドの名前
+static FACET_FIELDS: Lazy<HashMap<&str, &str>> =
+    Lazy::new(|| HashMap::from([("category", "category"), ("difficulty", "color")]));
 
 // ファセットカウント指定パラメータの値をバリデーションする関数
 fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
     if values
         .iter()
-        .all(|value| VALID_FACET_FIELDS.contains(value.as_str()))
+        .all(|value| FACET_FIELDS.contains_key(value.as_str()))
     {
         Ok(())
     } else {
@@ -97,28 +63,20 @@ fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
     }
 }
 
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct ProblemSearchParameter {
     #[validate(length(max = 200))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
     #[validate(range(min = 1, max = 200))]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[validate(range(min = 1))]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterParameter>,
     #[validate(custom = "validate_sort_field")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
     #[validate(custom = "validate_facet_fields")]
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     pub facet: Option<Vec<String>>,
 }
 
@@ -135,16 +93,10 @@ impl Default for ProblemSearchParameter {
     }
 }
 
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct FilterParameter {
-    #[validate(custom = "validate_category_filtering")]
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_comma_separated"
-    )]
     category: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     difficulty: Option<RangeFilterParameter>,
 }
 
@@ -200,39 +152,21 @@ impl ToQuery for ProblemSearchParameter {
             .and_then(|facet| {
                 let mut facet_params: BTreeMap<&str, Value> = BTreeMap::new();
                 for field in facet.iter() {
-                    match field.as_str() {
-                        "category" => {
-                            facet_params.insert(
-                                field,
-                                json!({
-                                    "type": "terms",
-                                    "field": "category",
-                                    "limit": -1,
-                                    "mincount": 0,
-                                    "domain": {
-                                        "excludeTags": ["category"]
-                                    }
-                                }),
-                            );
-                        }
-                        "difficulty" => {
-                            facet_params.insert(
-                                field,
-                                json!({
-                                    "type": "range",
-                                    "field": "difficulty",
-                                    "start": 0,
-                                    "end": 4000,
-                                    "gap": 400,
-                                    "other": "all",
-                                    "domain": {
-                                        "excludeTags": ["difficulty"]
-                                    }
-                                }),
-                            );
-                        }
-                        _ => {}
-                    };
+                    if let Some(facet_field) = FACET_FIELDS.get(field.as_str()) {
+                        facet_params.insert(
+                            field,
+                            json!({
+                                "type": "terms",
+                                "field": facet_field,
+                                "limit": -1,
+                                "mincount": 0,
+                                "sort": "index",
+                                "domain": {
+                                    "excludeTags": [field]
+                                }
+                            }),
+                        );
+                    }
                 }
                 serde_json::to_string(&facet_params).ok()
             })
@@ -309,6 +243,7 @@ pub struct ProblemResponse {
     pub contest_title: String,
     pub contest_url: String,
     pub difficulty: Option<i32>,
+    pub color: Option<String>,
     #[serde_as(as = "FromSolrDateTime")]
     pub start_at: DateTime<FixedOffset>,
     pub duration: i64,
@@ -320,7 +255,7 @@ pub struct ProblemResponse {
 pub struct FacetCounts {
     count: u32,
     category: Option<SolrTermFacetCount>,
-    difficulty: Option<SolrRangeFacetCount<i32>>,
+    difficulty: Option<SolrTermFacetCount>,
 }
 
 pub async fn search_problem(

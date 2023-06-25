@@ -62,27 +62,36 @@ pub async fn run(args: ServerArgs) -> Result<()> {
 }
 
 fn create_router(
-    problem_core: impl SolrCore + Sync + Send + 'static,
-    user_core: impl SolrCore + Sync + Send + 'static,
+    problem_core: impl SolrCore + Clone + Sync + Send + 'static,
+    user_core: impl SolrCore + Clone + Sync + Send + 'static,
 ) -> Router {
     // let origin = env::var("FRONTEND_ORIGIN_URL").unwrap_or(String::from("http://localhost:8000"));
     // let service = routing::get_service(ServeDir::new("assets"))
     //     .handle_error(|e| async move { (StatusCode::NOT_FOUND, format!("file not found: {}", e)) });
+    let problem_core = Arc::new(problem_core);
+    let user_core = Arc::new(user_core);
+
     let problem_routes = Router::new()
         .route("/problem", routing::get(search_problem))
-        .layer(Extension(Arc::new(problem_core)));
+        .layer(Extension(problem_core.clone()));
     let user_routes = Router::new()
         .route("/user", routing::get(search_user))
-        .layer(Extension(Arc::new(user_core)));
+        .layer(Extension(user_core.clone()));
     let search_routes = Router::new()
         .nest("/search", problem_routes)
         .nest("/search", user_routes);
+    let liveness_routes = Router::new()
+        .route("/liveness", routing::get(liveness))
+        .layer(Extension(problem_core.clone()));
+    let readiness_routes = Router::new()
+        .route("/readiness", routing::get(readiness))
+        .layer(Extension(problem_core.clone()));
 
     Router::new()
         .nest("/api", search_routes)
         // .nest_service("/", service)
-        .route("/api/liveness", routing::get(liveness))
-        .route("/api/readiness", routing::get(readiness))
+        .nest("/api", liveness_routes)
+        .nest("/api", readiness_routes)
     // .layer(
     //     CorsLayer::new()
     //         .allow_origin(AllowOrigin::exact(origin.parse().unwrap()))

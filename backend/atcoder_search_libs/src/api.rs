@@ -1,4 +1,5 @@
-use serde::{de::IntoDeserializer, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use validator::Validate;
 
 pub trait ToQuery {
@@ -9,6 +10,7 @@ pub trait FieldList {
     fn field_list() -> &'static str;
 }
 
+#[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
 pub struct RangeFilterParameter {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,48 +35,6 @@ impl RangeFilterParameter {
             .unwrap_or(String::from("*"));
         Some(format!("[{} TO {}}}", from, to))
     }
-}
-
-pub fn deserialize_optional_comma_separated<'de, D, T>(
-    deserializer: D,
-) -> Result<Option<Vec<T>>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    let value = String::deserialize(deserializer)?;
-    let values: Result<Vec<T>, D::Error> = value
-        .split(',')
-        .into_iter()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(|v| T::deserialize(v.into_deserializer()))
-        .collect();
-
-    values.and_then(|values| {
-        if values.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(values))
-        }
-    })
-}
-
-pub fn deserialize_comma_separated<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    let value = String::deserialize(deserializer)?;
-    let values: Result<Vec<T>, D::Error> = value
-        .split(',')
-        .into_iter()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(|v| T::deserialize(v.into_deserializer()))
-        .collect();
-
-    values.and_then(|values| Ok(values))
 }
 
 #[derive(Debug, Serialize)]

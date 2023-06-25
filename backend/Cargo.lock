@@ -2180,9 +2180,9 @@ dependencies = [
 
 [[package]]
 name = "serde_structuredqs"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34392dd6ce02c2e0633db14c02fdad3b0f2ca63f7db22e5ed0c41b93963713e6"
+checksum = "249c4986fdccef58f9e591e7dee862e7fc1655eb011017c74b35c4164bbac443"
 dependencies = [
  "form_urlencoded",
  "itoa",
