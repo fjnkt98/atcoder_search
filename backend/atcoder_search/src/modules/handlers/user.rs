@@ -135,7 +135,7 @@ fn term_filtering(
         })
         .and_then(|expr| {
             Some(format!(
-                "{{tag!={field_name}}}{field_name}:({expr})",
+                "{{!tag={field_name}}}{field_name}:({expr})",
                 field_name = field_name,
                 expr = expr
             ))
