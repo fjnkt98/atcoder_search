@@ -139,7 +139,7 @@ impl ToQuery for ProblemSearchParameter {
                     Some(format!("{} asc", sort))
                 }
             })
-            .unwrap_or(String::from(""));
+            .unwrap_or(String::from("problem_id asc"));
         let fq = self
             .filter
             .as_ref()

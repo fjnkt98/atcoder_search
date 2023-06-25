@@ -206,7 +206,7 @@ impl ToQuery for UserSearchParameter {
                     Some(format!("{} asc", sort))
                 }
             })
-            .unwrap_or(String::from(""));
+            .unwrap_or(String::from("rank asc"));
         let fq = self
             .filter
             .as_ref()
