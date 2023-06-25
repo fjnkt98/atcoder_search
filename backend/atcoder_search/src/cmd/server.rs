@@ -1,5 +1,5 @@
-use crate::modules::handlers::{liveness, readiness, search_with_qs};
-use anyhow::{Context, Result};
+use crate::modules::handlers::{liveness, problem::search_problem, readiness, user::search_user};
+use anyhow::Result;
 use atcoder_search_libs::solr::core::{SolrCore, StandaloneSolrCore};
 use axum::{extract::Extension, routing, Router, Server};
 use clap::Args;
@@ -16,25 +16,33 @@ pub async fn run(args: ServerArgs) -> Result<()> {
         tracing::warn!("SOLR_HOST environment variable is not set. Default value `http://localhost:8983` will be used.");
         String::from("http://localhost:8983")
     });
-    let core_name = env::var("CORE_NAME").with_context(|| {
-        let message = "SOLR_HOST environment variable must be set";
-        tracing::error!(message);
-        format!("{}", message)
-    })?;
+    let problem_core_name = env::var("PROBLEMS_CORE_NAME").unwrap_or_else(|_| {
+        tracing::warn!("PROBLEMS_CORE_NAME not set. name 'problems' will be used.");
+        String::from("problems")
+    });
+    let user_core_name = env::var("USERS_CORE_NAME").unwrap_or_else(|_| {
+        tracing::warn!("USERS_CORE_NAME not set. name 'problems' will be used.");
+        String::from("users")
+    });
 
-    tracing::info!("Connect to Solr core {}", core_name);
-    let core = StandaloneSolrCore::new(&core_name, &solr_host).with_context(|| {
-        let message = "couldn't create Solr core instance. check your Solr instance status and value of SOLR_HOST environment variable.";
-        tracing::error!(message);
-        format!("{}", message)
-    })?;
+    let problem_core = match StandaloneSolrCore::new(&problem_core_name, &solr_host) {
+        Ok(core) => core,
+        Err(_) => {
+            let message = "couldn't create problems core instance. check your Solr instance status and value of SOLR_HOST environment variable.";
+            tracing::error!(message);
+            anyhow::bail!(message)
+        }
+    };
+    let user_core = match StandaloneSolrCore::new(&user_core_name, &solr_host) {
+        Ok(core) => core,
+        Err(_) => {
+            let message = "couldn't create users core instance. check your Solr instance status and value of SOLR_HOST environment variable.";
+            tracing::error!(message);
+            anyhow::bail!(message)
+        }
+    };
 
-    core.ping().await.with_context(|| {
-        let message = format!("core {} is not available", core_name);
-        tracing::error!(message);
-        message
-    })?;
-    let app = create_router(core);
+    let app = create_router(problem_core, user_core);
     let port = match args.port {
         Some(port) => port,
         None => {
@@ -53,17 +61,28 @@ pub async fn run(args: ServerArgs) -> Result<()> {
     Ok(())
 }
 
-fn create_router(core: impl SolrCore + Sync + Send + 'static) -> Router {
+fn create_router(
+    problem_core: impl SolrCore + Sync + Send + 'static,
+    user_core: impl SolrCore + Sync + Send + 'static,
+) -> Router {
     // let origin = env::var("FRONTEND_ORIGIN_URL").unwrap_or(String::from("http://localhost:8000"));
     // let service = routing::get_service(ServeDir::new("assets"))
     //     .handle_error(|e| async move { (StatusCode::NOT_FOUND, format!("file not found: {}", e)) });
+    let problem_routes = Router::new()
+        .route("/problem", routing::get(search_problem))
+        .layer(Extension(Arc::new(problem_core)));
+    let user_routes = Router::new()
+        .route("/user", routing::get(search_user))
+        .layer(Extension(Arc::new(user_core)));
+    let search_routes = Router::new()
+        .nest("/search", problem_routes)
+        .nest("/search", user_routes);
 
     Router::new()
-        .route("/api/search", routing::get(search_with_qs))
+        .nest("/api", search_routes)
         // .nest_service("/", service)
         .route("/api/liveness", routing::get(liveness))
         .route("/api/readiness", routing::get(readiness))
-        .layer(Extension(Arc::new(core)))
     // .layer(
     //     CorsLayer::new()
     //         .allow_origin(AllowOrigin::exact(origin.parse().unwrap()))

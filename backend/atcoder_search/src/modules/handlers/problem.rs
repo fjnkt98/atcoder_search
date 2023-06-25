@@ -1,14 +1,33 @@
-use crate::types::response::{ResponseDocument, SearchResultResponse};
 use atcoder_search_libs::{
-    solr::query::{sanitize, EDisMaxQueryBuilder, Operator},
-    FieldList, ToQueryParameter,
+    api::{
+        deserialize_optional_comma_separated, RangeFilterParameter, SearchResultResponse,
+        SearchResultStats,
+    },
+    solr::{
+        core::{SolrCore, StandaloneSolrCore},
+        model::*,
+        query::{sanitize, EDisMaxQueryBuilder, Operator},
+    },
+    FieldList, ToQuery,
 };
-use axum::{async_trait, extract::FromRequestParts, http::StatusCode, Json};
+use axum::{
+    async_trait,
+    extract::{Extension, FromRequestParts},
+    http::StatusCode,
+    Json,
+};
+use chrono::{DateTime, FixedOffset};
 use http::request::Parts;
+use itertools::Itertools;
 use once_cell::sync::Lazy;
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use serde_with::serde_as;
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
+use tokio::time::Instant;
 use validator::{Validate, ValidationError};
 
 // ソート順に指定できるフィールドの集合
@@ -79,7 +98,7 @@ fn validate_facet_fields(values: &Vec<String>) -> Result<(), ValidationError> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
-pub struct SearchQueryParameters {
+pub struct ProblemSearchParameter {
     #[validate(length(max = 200))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
@@ -90,7 +109,7 @@ pub struct SearchQueryParameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub filter: Option<FilterParameters>,
+    pub filter: Option<FilterParameter>,
     #[validate(custom = "validate_sort_field")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
@@ -98,72 +117,57 @@ pub struct SearchQueryParameters {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "comma_separated_values"
+        deserialize_with = "deserialize_optional_comma_separated"
     )]
     pub facet: Option<Vec<String>>,
 }
 
+impl Default for ProblemSearchParameter {
+    fn default() -> Self {
+        Self {
+            keyword: None,
+            limit: None,
+            page: None,
+            filter: None,
+            sort: None,
+            facet: None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
-pub struct FilterParameters {
+pub struct FilterParameter {
     #[validate(custom = "validate_category_filtering")]
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "comma_separated_values"
+        deserialize_with = "deserialize_optional_comma_separated"
     )]
     category: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     difficulty: Option<RangeFilterParameter>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Validate, PartialEq, Eq, Clone)]
-pub struct RangeFilterParameter {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    from: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    to: Option<i32>,
-}
-
-impl RangeFilterParameter {
-    pub fn to_range(&self) -> Option<String> {
-        if self.from.is_none() && self.to.is_none() {
-            return None;
+impl FilterParameter {
+    pub fn to_query(&self) -> Vec<String> {
+        let mut query = vec![];
+        if let Some(categories) = &self.category {
+            query.push(format!(
+                "{{!tag=category}}category:({})",
+                categories.iter().map(|c| sanitize(c)).join(" OR ")
+            ));
+        }
+        if let Some(difficulty) = &self.difficulty {
+            if let Some(range) = difficulty.to_range() {
+                query.push(format!("{{!tag=difficulty}}difficulty:{}", range));
+            }
         }
 
-        let from = &self
-            .from
-            .and_then(|from| Some(from.to_string()))
-            .unwrap_or(String::from("*"));
-        let to = &self
-            .to
-            .and_then(|to| Some(to.to_string()))
-            .unwrap_or(String::from("*"));
-        Some(format!("[{} TO {}}}", from, to))
+        query
     }
 }
 
-// カンマ区切りの文字列フィールドをベクタに変換するカスタムデシリアライズ関数
-fn comma_separated_values<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = String::deserialize(deserializer)?;
-    let values = value
-        .split(',')
-        .into_iter()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(String::from)
-        .collect();
-
-    if value.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(values))
-    }
-}
-
-impl ToQueryParameter for SearchQueryParameters {
+impl ToQuery for ProblemSearchParameter {
     fn to_query(&self) -> Vec<(String, String)> {
         let rows = self.limit.unwrap_or(20);
         let page = self.page.unwrap_or(1);
@@ -236,7 +240,7 @@ impl ToQueryParameter for SearchQueryParameters {
 
         EDisMaxQueryBuilder::new()
             .facet(facet)
-            .fl(ResponseDocument::field_list())
+            .fl(ProblemResponse::field_list())
             .fq(&fq)
             .op(Operator::AND)
             .q(keyword)
@@ -250,34 +254,18 @@ impl ToQueryParameter for SearchQueryParameters {
     }
 }
 
-impl FilterParameters {
-    pub fn to_query(&self) -> Vec<String> {
-        let mut query = vec![];
-        if let Some(categories) = &self.category {
-            query.push(format!(
-                "{{!tag=category}}category:({})",
-                categories.join(" OR ")
-            ));
-        }
-        if let Some(difficulty) = &self.difficulty {
-            if let Some(range) = difficulty.to_range() {
-                query.push(format!("{{!tag=difficulty}}difficulty:{}", range));
-            }
-        }
-
-        query
-    }
-}
-
-pub struct ValidatedSearchQueryParameters<T>(pub T);
+pub struct ValidatedProblemSearchParameter<T>(pub T);
 
 #[async_trait]
-impl<T, S> FromRequestParts<S> for ValidatedSearchQueryParameters<T>
+impl<T, S> FromRequestParts<S> for ValidatedProblemSearchParameter<T>
 where
-    T: DeserializeOwned + Validate + Serialize,
+    T: DeserializeOwned + Validate + Serialize + Default + Clone,
     S: Send + Sync,
 {
-    type Rejection = (StatusCode, Json<SearchResultResponse>);
+    type Rejection = (
+        StatusCode,
+        Json<SearchResultResponse<T, ProblemResponse, FacetCounts>>,
+    );
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let query = parts.uri.query().unwrap_or_default();
@@ -285,10 +273,12 @@ where
             tracing::error!("Parsing error: {}", rejection);
             (
                 StatusCode::BAD_REQUEST,
-                Json(SearchResultResponse::error(
-                    &Value::Null,
-                    format!("invalid format query string: [{}]", rejection),
-                )),
+                Json(
+                    SearchResultResponse::<T, ProblemResponse, FacetCounts>::error(
+                        T::default(),
+                        format!("invalid format query string: [{}]", rejection),
+                    ),
+                ),
             )
         })?;
 
@@ -296,15 +286,99 @@ where
             tracing::error!("Validation error: {}", rejection);
             (
                 StatusCode::BAD_REQUEST,
-                Json(SearchResultResponse::error(
-                    &value,
-                    format!("Validation error: [{}]", rejection).replace('\n', ", "),
-                )),
+                Json(
+                    SearchResultResponse::<T, ProblemResponse, FacetCounts>::error(
+                        value.clone(),
+                        format!("Validation error: [{}]", rejection).replace('\n', ", "),
+                    ),
+                ),
             )
         })?;
 
-        Ok(ValidatedSearchQueryParameters(value))
+        Ok(ValidatedProblemSearchParameter(value))
     }
+}
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize, FieldList)]
+pub struct ProblemResponse {
+    pub problem_id: String,
+    pub problem_title: String,
+    pub problem_url: String,
+    pub contest_id: String,
+    pub contest_title: String,
+    pub contest_url: String,
+    pub difficulty: Option<i32>,
+    #[serde_as(as = "FromSolrDateTime")]
+    pub start_at: DateTime<FixedOffset>,
+    pub duration: i64,
+    pub rate_change: String,
+    pub category: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FacetCounts {
+    count: u32,
+    category: Option<SolrTermFacetCount>,
+    difficulty: Option<SolrRangeFacetCount<i32>>,
+}
+
+pub async fn search_problem(
+    ValidatedProblemSearchParameter(params): ValidatedProblemSearchParameter<
+        ProblemSearchParameter,
+    >,
+    Extension(core): Extension<Arc<StandaloneSolrCore>>,
+) -> (
+    StatusCode,
+    Json<SearchResultResponse<ProblemSearchParameter, ProblemResponse, FacetCounts>>,
+) {
+    let start_process = Instant::now();
+
+    let response: SolrSelectResponse<ProblemResponse, FacetCounts> =
+        match core.select(&params.to_query()).await {
+            Ok(res) => res,
+            Err(e) => {
+                tracing::error!("request failed cause: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(SearchResultResponse::error(params, "unexpected error")),
+                );
+            }
+        };
+
+    let time: u32 = Instant::now().duration_since(start_process).as_millis() as u32;
+    let total: u32 = response.response.num_found;
+    let count: u32 = response.response.docs.len() as u32;
+    let rows: u32 = params.limit.unwrap_or(20);
+    let index: u32 = (response.response.start / rows) + 1;
+    let pages: u32 = (total + rows - 1) / rows;
+
+    tracing::info!(
+        target: "querylog",
+        "elapsed_time={} hits={} params={}",
+        time, total, serde_json::to_string(&params).unwrap_or(String::from(""))
+    );
+
+    let stats = SearchResultStats {
+        time,
+        total,
+        index,
+        count,
+        pages,
+        params,
+        facet: response.facets,
+    };
+
+    (
+        StatusCode::OK,
+        Json(
+            SearchResultResponse::<ProblemSearchParameter, ProblemResponse, FacetCounts> {
+                stats,
+                items: response.response.docs,
+                message: None,
+            },
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -314,13 +388,13 @@ mod test {
     #[test]
     fn test_deserialize() {
         let query = "keyword=OR&facet=category,difficulty&filter.category=ABC,ARC&filter.difficulty.from=800&sort=-score";
-        let params: SearchQueryParameters = serde_structuredqs::from_str(query).unwrap();
+        let params: ProblemSearchParameter = serde_structuredqs::from_str(query).unwrap();
 
-        let expected = SearchQueryParameters {
+        let expected = ProblemSearchParameter {
             keyword: Some(String::from("OR")),
             limit: None,
             page: None,
-            filter: Some(FilterParameters {
+            filter: Some(FilterParameter {
                 category: Some(vec![String::from("ABC"), String::from("ARC")]),
                 difficulty: Some(RangeFilterParameter {
                     from: Some(800),
@@ -336,8 +410,8 @@ mod test {
 
     #[test]
     fn empty_query_string() {
-        let params: SearchQueryParameters = serde_structuredqs::from_str("").unwrap();
-        let expected = SearchQueryParameters {
+        let params: ProblemSearchParameter = serde_structuredqs::from_str("").unwrap();
+        let expected = ProblemSearchParameter {
             keyword: None,
             limit: None,
             page: None,

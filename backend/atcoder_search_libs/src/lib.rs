@@ -2,7 +2,7 @@ pub mod api;
 pub mod indexing;
 pub mod solr;
 
-pub use api::{FieldList, ToQueryParameter};
+pub use api::{FieldList, ToQuery};
 pub use atcoder_search_derive::{ExpandField, FieldList};
 pub use indexing::{
     DocumentUploader, ExpandField, GenerateDocument, PostDocument, ReadRows, ToDocument,
