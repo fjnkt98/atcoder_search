@@ -1,7 +1,8 @@
 use crate::{
     cmd::TargetDomain,
     modules::{
-        problems::generator::ProblemDocumentGenerator, users::generator::UserDocumentGenerator,
+        problems::generator::ProblemDocumentGenerator,
+        recommend::generator::RecommendDocumentGenerator, users::generator::UserDocumentGenerator,
     },
 };
 use anyhow::{Context, Result};
@@ -79,15 +80,16 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
 
     match args.domain {
         TargetDomain::Problems => {
-            let generator = ProblemDocumentGenerator::new(&pool, &save_dir);
+            let generator = ProblemDocumentGenerator::new(pool, &save_dir);
             generator.run().await
         }
         TargetDomain::Users => {
-            let generator = UserDocumentGenerator::new(&pool, &save_dir);
+            let generator = UserDocumentGenerator::new(pool, &save_dir);
             generator.run().await
         }
-        TargetDomain::Recommend => {
-            todo!();
+        TargetDomain::Recommends => {
+            let generator = RecommendDocumentGenerator::new(pool, &save_dir);
+            generator.run().await
         }
     }
 }

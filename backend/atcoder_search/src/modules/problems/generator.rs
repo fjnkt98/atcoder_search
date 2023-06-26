@@ -7,8 +7,8 @@ use once_cell::sync::Lazy;
 use serde_json::Value;
 use sqlx::{postgres::Postgres, FromRow, Pool};
 use std::path::{Path, PathBuf};
-use tokio::macros::support::Pin;
-use tokio_stream::Stream;
+use tokio::sync::mpsc::Sender;
+use tokio_stream::StreamExt;
 
 static EXTRACTOR: Lazy<FullTextExtractor> = Lazy::new(|| FullTextExtractor::new());
 
@@ -28,10 +28,11 @@ pub struct Row {
     pub is_experimental: Option<bool>,
 }
 
+#[async_trait]
 impl ToDocument for Row {
     type Document = Value;
 
-    fn to_document(self) -> Result<Value> {
+    async fn to_document(self) -> Result<Value> {
         let (statement_ja, statement_en) = EXTRACTOR.extract(&self.html)?;
         let contest_url: String = format!("https://atcoder.jp/contests/{}", self.contest_id);
 
@@ -87,13 +88,13 @@ pub struct ProblemIndex {
     pub statement_en: Vec<String>,
 }
 
-pub struct ProblemDocumentGenerator<'a> {
-    pool: &'a Pool<Postgres>,
+pub struct ProblemDocumentGenerator {
+    pool: Pool<Postgres>,
     save_dir: PathBuf,
 }
 
-impl<'a> ProblemDocumentGenerator<'a> {
-    pub fn new(pool: &'a Pool<Postgres>, save_dir: &Path) -> Self {
+impl ProblemDocumentGenerator {
+    pub fn new(pool: Pool<Postgres>, save_dir: &Path) -> Self {
         Self {
             pool,
             save_dir: save_dir.to_owned(),
@@ -109,7 +110,7 @@ impl<'a> ProblemDocumentGenerator<'a> {
             }
         };
 
-        match self.generate(&self.save_dir, 1000).await {
+        match self.generate(self.pool.clone(), &self.save_dir, 1000).await {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("failed to generate document: {:?}", e);
@@ -122,14 +123,12 @@ impl<'a> ProblemDocumentGenerator<'a> {
 }
 
 #[async_trait]
-impl<'a> ReadRows<'a> for ProblemDocumentGenerator<'a> {
+impl ReadRows for ProblemDocumentGenerator {
     type Row = Row;
 
-    async fn read_rows(
-        &'a self,
-    ) -> Result<Pin<Box<dyn Stream<Item = std::result::Result<Self::Row, sqlx::Error>> + Send + 'a>>>
-    {
-        let stream = sqlx::query_as(
+    async fn read_rows(pool: Pool<Postgres>, tx: Sender<<Self as ReadRows>::Row>) -> Result<()> {
+        let mut stream = sqlx::query_as!(
+            Row,
             r#"
             SELECT
                 "problems"."problem_id" AS "problem_id",
@@ -150,11 +149,17 @@ impl<'a> ReadRows<'a> for ProblemDocumentGenerator<'a> {
                 LEFT JOIN "difficulties" ON "problems"."problem_id" = "difficulties"."problem_id"
             "#,
         )
-        .fetch(self.pool);
+        .fetch(&pool);
 
-        Ok(stream)
+        while let Some(row) = stream.try_next().await? {
+            tx.send(row).await?;
+        }
+
+        Ok(())
     }
 }
 
 #[async_trait]
-impl<'a> GenerateDocument<'a> for ProblemDocumentGenerator<'a> {}
+impl GenerateDocument for ProblemDocumentGenerator {
+    type Reader = Self;
+}

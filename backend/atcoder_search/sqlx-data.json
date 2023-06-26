@@ -1,0 +1,189 @@
+{
+  "db": "PostgreSQL",
+  "2e57a7e51156e33e3ae797687383e6b42725ed1cf2dc155356e45d874781cc6e": {
+    "describe": {
+      "columns": [
+        {
+          "name": "problem_id",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "difficulty",
+          "ordinal": 1,
+          "type_info": "Int4"
+        },
+        {
+          "name": "is_experimental",
+          "ordinal": 2,
+          "type_info": "Bool"
+        }
+      ],
+      "nullable": [
+        false,
+        true,
+        true
+      ],
+      "parameters": {
+        "Left": []
+      }
+    },
+    "query": "\n            SELECT\n                \"problems\".\"problem_id\" AS \"problem_id\",\n                \"difficulties\".\"difficulty\" AS \"difficulty\",\n                \"difficulties\".\"is_experimental\" AS \"is_experimental\"\n            FROM\n                \"problems\"\n                LEFT JOIN \"difficulties\" ON \"problems\".\"problem_id\" = \"difficulties\".\"problem_id\"\n            "
+  },
+  "897c3dba83e483c7bf145219367ceca0b4bf8b0116d5e6988b6a217246f6544a": {
+    "describe": {
+      "columns": [
+        {
+          "name": "user_name",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "rating",
+          "ordinal": 1,
+          "type_info": "Int4"
+        },
+        {
+          "name": "highest_rating",
+          "ordinal": 2,
+          "type_info": "Int4"
+        },
+        {
+          "name": "affiliation",
+          "ordinal": 3,
+          "type_info": "Text"
+        },
+        {
+          "name": "birth_year",
+          "ordinal": 4,
+          "type_info": "Int4"
+        },
+        {
+          "name": "country",
+          "ordinal": 5,
+          "type_info": "Text"
+        },
+        {
+          "name": "crown",
+          "ordinal": 6,
+          "type_info": "Text"
+        },
+        {
+          "name": "join_count",
+          "ordinal": 7,
+          "type_info": "Int4"
+        },
+        {
+          "name": "rank",
+          "ordinal": 8,
+          "type_info": "Int4"
+        },
+        {
+          "name": "wins",
+          "ordinal": 9,
+          "type_info": "Int4"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": []
+      }
+    },
+    "query": "\n            SELECT\n                \"user_name\",\n                \"rating\",\n                \"highest_rating\",\n                \"affiliation\",\n                \"birth_year\",\n                \"country\",\n                \"crown\",\n                \"join_count\",\n                \"rank\",\n                \"wins\"\n            FROM\n                \"users\"\n            "
+  },
+  "8afc727a143638068d6d3011917d481427d6068427db7fa6fe6f88d02b9e914f": {
+    "describe": {
+      "columns": [
+        {
+          "name": "problem_id",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "problem_title",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "problem_url",
+          "ordinal": 2,
+          "type_info": "Text"
+        },
+        {
+          "name": "contest_id",
+          "ordinal": 3,
+          "type_info": "Text"
+        },
+        {
+          "name": "contest_title",
+          "ordinal": 4,
+          "type_info": "Text"
+        },
+        {
+          "name": "start_at",
+          "ordinal": 5,
+          "type_info": "Int8"
+        },
+        {
+          "name": "duration",
+          "ordinal": 6,
+          "type_info": "Int8"
+        },
+        {
+          "name": "rate_change",
+          "ordinal": 7,
+          "type_info": "Text"
+        },
+        {
+          "name": "category",
+          "ordinal": 8,
+          "type_info": "Text"
+        },
+        {
+          "name": "html",
+          "ordinal": 9,
+          "type_info": "Text"
+        },
+        {
+          "name": "difficulty",
+          "ordinal": 10,
+          "type_info": "Int4"
+        },
+        {
+          "name": "is_experimental",
+          "ordinal": 11,
+          "type_info": "Bool"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true
+      ],
+      "parameters": {
+        "Left": []
+      }
+    },
+    "query": "\n            SELECT\n                \"problems\".\"problem_id\" AS \"problem_id\",\n                \"problems\".\"title\" AS \"problem_title\",\n                \"problems\".\"url\" AS \"problem_url\",\n                \"contests\".\"contest_id\" AS \"contest_id\",\n                \"contests\".\"title\" AS \"contest_title\",\n                \"contests\".\"start_epoch_second\" AS \"start_at\",\n                \"contests\".\"duration_second\" AS \"duration\",\n                \"contests\".\"rate_change\" AS \"rate_change\",\n                \"contests\".\"category\" AS \"category\",\n                \"problems\".\"html\" AS \"html\",\n                \"difficulties\".\"difficulty\" AS \"difficulty\",\n                \"difficulties\".\"is_experimental\" AS \"is_experimental\"\n            FROM\n                \"problems\"\n                JOIN \"contests\" ON \"problems\".\"contest_id\" = \"contests\".\"contest_id\"\n                LEFT JOIN \"difficulties\" ON \"problems\".\"problem_id\" = \"difficulties\".\"problem_id\"\n            "
+  }
+}

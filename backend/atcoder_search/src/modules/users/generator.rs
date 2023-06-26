@@ -5,8 +5,8 @@ use atcoder_search_libs::{GenerateDocument, ReadRows, ToDocument};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::Postgres, Pool};
 use std::path::{Path, PathBuf};
-use tokio::macros::support::Pin;
-use tokio_stream::Stream;
+use tokio::sync::mpsc::Sender;
+use tokio_stream::StreamExt;
 
 fn join_count_grade(join_count: i32) -> String {
     if join_count < 10 {
@@ -20,10 +20,11 @@ fn join_count_grade(join_count: i32) -> String {
     }
 }
 
+#[async_trait]
 impl ToDocument for User {
     type Document = UserIndex;
 
-    fn to_document(self) -> Result<UserIndex> {
+    async fn to_document(self) -> Result<UserIndex> {
         Ok(self.into())
     }
 }
@@ -74,13 +75,13 @@ impl From<User> for UserIndex {
     }
 }
 
-pub struct UserDocumentGenerator<'a> {
-    pool: &'a Pool<Postgres>,
+pub struct UserDocumentGenerator {
+    pool: Pool<Postgres>,
     save_dir: PathBuf,
 }
 
-impl<'a> UserDocumentGenerator<'a> {
-    pub fn new(pool: &'a Pool<Postgres>, save_dir: &Path) -> Self {
+impl UserDocumentGenerator {
+    pub fn new(pool: Pool<Postgres>, save_dir: &Path) -> Self {
         Self {
             pool,
             save_dir: save_dir.to_owned(),
@@ -96,7 +97,10 @@ impl<'a> UserDocumentGenerator<'a> {
             }
         };
 
-        match self.generate(&self.save_dir, 10000).await {
+        match self
+            .generate(self.pool.clone(), &self.save_dir, 10000)
+            .await
+        {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("failed to generate document: {:?}", e);
@@ -109,14 +113,12 @@ impl<'a> UserDocumentGenerator<'a> {
 }
 
 #[async_trait]
-impl<'a> ReadRows<'a> for UserDocumentGenerator<'a> {
+impl ReadRows for UserDocumentGenerator {
     type Row = User;
 
-    async fn read_rows(
-        &'a self,
-    ) -> Result<Pin<Box<dyn Stream<Item = std::result::Result<Self::Row, sqlx::Error>> + Send + 'a>>>
-    {
-        let stream = sqlx::query_as(
+    async fn read_rows(pool: Pool<Postgres>, tx: Sender<<Self as ReadRows>::Row>) -> Result<()> {
+        let mut stream = sqlx::query_as!(
+            User,
             r#"
             SELECT
                 "user_name",
@@ -133,11 +135,17 @@ impl<'a> ReadRows<'a> for UserDocumentGenerator<'a> {
                 "users"
             "#,
         )
-        .fetch(self.pool);
+        .fetch(&pool);
 
-        Ok(stream)
+        while let Some(row) = stream.try_next().await? {
+            tx.send(row).await?;
+        }
+
+        Ok(())
     }
 }
 
 #[async_trait]
-impl<'a> GenerateDocument<'a> for UserDocumentGenerator<'a> {}
+impl GenerateDocument for UserDocumentGenerator {
+    type Reader = Self;
+}

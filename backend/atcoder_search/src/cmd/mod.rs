@@ -11,7 +11,7 @@ use std::fmt;
 pub enum TargetDomain {
     Problems,
     Users,
-    Recommend,
+    Recommends,
 }
 
 impl fmt::Display for TargetDomain {
@@ -19,7 +19,7 @@ impl fmt::Display for TargetDomain {
         match self {
             TargetDomain::Problems => write!(f, "problems"),
             TargetDomain::Users => write!(f, "users"),
-            TargetDomain::Recommend => write!(f, "recommend"),
+            TargetDomain::Recommends => write!(f, "recommends"),
         }
     }
 }

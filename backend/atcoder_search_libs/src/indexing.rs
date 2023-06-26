@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use futures::stream::FuturesUnordered;
 use serde::Serialize;
 use serde_json::Value;
+use sqlx::{postgres::Postgres, Pool};
 use std::{
     ffi::OsString,
     fmt::Debug,
@@ -11,31 +12,30 @@ use std::{
     io::BufWriter,
     mem,
     path::{Path, PathBuf},
-    pin::Pin,
     sync::Arc,
 };
 use tokio::{
     sync::mpsc::{Receiver, Sender},
     task::JoinHandle,
 };
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 
 pub trait ExpandField {
     fn expand(&self) -> Value;
 }
 
 #[async_trait]
-pub trait ReadRows<'a> {
+pub trait ReadRows {
     type Row: Debug + ToDocument + Send + Sync + 'static;
-    async fn read_rows(
-        &'a self,
-    ) -> Result<Pin<Box<dyn Stream<Item = std::result::Result<Self::Row, sqlx::Error>> + Send + 'a>>>;
+
+    async fn read_rows(pool: Pool<Postgres>, tx: Sender<<Self as ReadRows>::Row>) -> Result<()>;
 }
 
+#[async_trait]
 pub trait ToDocument {
     type Document: Debug + Serialize + Send + Sync + 'static;
 
-    fn to_document(self) -> Result<Self::Document>;
+    async fn to_document(self) -> Result<Self::Document>;
 }
 
 #[async_trait]
@@ -120,8 +120,10 @@ impl DocumentUploader {
 impl PostDocument for DocumentUploader {}
 
 #[async_trait]
-pub trait GenerateDocument<'a>: ReadRows<'a> {
-    async fn clean(&'a self, save_dir: &Path) -> Result<()> {
+pub trait GenerateDocument: ReadRows {
+    type Reader: ReadRows + Sync + Send + 'static;
+
+    async fn clean(&self, save_dir: &Path) -> Result<()> {
         let mut files = tokio::fs::read_dir(save_dir).await?;
 
         tracing::info!("Start to delete existing file in {}.", save_dir.display());
@@ -136,16 +138,21 @@ pub trait GenerateDocument<'a>: ReadRows<'a> {
         Ok(())
     }
 
-    async fn generate(&'a self, save_dir: &Path, chunk_size: usize) -> Result<()> {
+    async fn generate(
+        &self,
+        pool: Pool<Postgres>,
+        save_dir: &Path,
+        chunk_size: usize,
+    ) -> Result<()> {
         let (tx, mut rx): (
-            Sender<<<Self as ReadRows>::Row as ToDocument>::Document>,
-            Receiver<<<Self as ReadRows>::Row as ToDocument>::Document>,
+            Sender<<<Self::Reader as ReadRows>::Row as ToDocument>::Document>,
+            Receiver<<<Self::Reader as ReadRows>::Row as ToDocument>::Document>,
         ) = tokio::sync::mpsc::channel(2 * chunk_size);
 
         let save_dir: PathBuf = save_dir.to_owned();
         let saver = tokio::task::spawn_blocking(move || {
             let mut suffix: u32 = 0;
-            let mut documents: Vec<<<Self as ReadRows>::Row as ToDocument>::Document> =
+            let mut documents: Vec<<<Self::Reader as ReadRows>::Row as ToDocument>::Document> =
                 Vec::with_capacity(chunk_size);
 
             while let Some(document) = rx.blocking_recv() {
@@ -198,12 +205,18 @@ pub trait GenerateDocument<'a>: ReadRows<'a> {
             }
         });
 
-        let mut stream = self.read_rows().await?;
+        let (row_tx, mut row_rx): (
+            Sender<<Self::Reader as ReadRows>::Row>,
+            Receiver<<Self::Reader as ReadRows>::Row>,
+        ) = tokio::sync::mpsc::channel(2 * chunk_size);
+
+        let reader = tokio::task::spawn(Self::Reader::read_rows(pool, row_tx));
+
         let mut tasks: FuturesUnordered<JoinHandle<()>> = FuturesUnordered::new();
-        while let Some(row) = StreamExt::try_next(&mut stream).await? {
+        while let Some(row) = row_rx.recv().await {
             let tx = tx.clone();
             let task = tokio::task::spawn(async move {
-                let document = match row.to_document() {
+                let document = match row.to_document().await {
                     Ok(document) => document,
                     Err(e) => {
                         let message = format!(
@@ -228,6 +241,7 @@ pub trait GenerateDocument<'a>: ReadRows<'a> {
                 Ok(()) => {}
                 Err(e) => {
                     tracing::error!("an error occurred when generating document: {:?}", e);
+                    reader.abort();
                     saver.abort();
                     return Err(anyhow::anyhow!(e));
                 }
