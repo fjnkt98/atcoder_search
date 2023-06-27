@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use atcoder_search_libs::{GenerateDocument, ReadRows, ToDocument};
+use itertools::Itertools;
 use serde::Serialize;
 use sqlx::{postgres::Postgres, FromRow, Pool};
 use std::path::{Path, PathBuf};
@@ -25,11 +26,48 @@ impl ToDocument for Row {
     type Document = RecommendIndex;
 
     async fn to_document(self) -> Result<RecommendIndex> {
-        let related_problem = String::from("");
+        let difficulty_correlation = if let Some(difficulty) = &self.data.difficulty {
+            let rows = sqlx::query!(
+                r#"
+            SELECT
+                "problem_id",
+                CAST (
+                    ROUND(
+                        EXP(-POW(($1::integer - "difficulty"), 2.0) / 57707.8),
+                        6
+                    )
+                    AS DOUBLE PRECISION
+                ) AS "correlation"
+            FROM
+                "problems"
+                LEFT JOIN "difficulties" USING("problem_id")
+            WHERE
+                "problem_id" <> $2::text
+                AND "difficulty" IS NOT NULL
+            ORDER BY
+                "correlation" DESC
+            LIMIT
+                100
+            "#,
+                difficulty,
+                self.data.problem_id
+            )
+            .fetch_all(&self.pool)
+            .await?;
+
+            Some(
+                rows.iter()
+                    .filter(|&row| row.correlation.is_some())
+                    .map(|row| format!("{}|{}", row.problem_id, row.correlation.unwrap()))
+                    .join(" "),
+            )
+        } else {
+            None
+        };
 
         Ok(RecommendIndex {
             problem_id: self.data.problem_id,
-            related_problem,
+            difficulty_correlation,
             difficulty: self.data.difficulty,
             is_experimental: self.data.is_experimental.unwrap_or(false),
         })
@@ -39,7 +77,7 @@ impl ToDocument for Row {
 #[derive(Debug, Serialize)]
 pub struct RecommendIndex {
     pub problem_id: String,
-    pub related_problem: String,
+    pub difficulty_correlation: Option<String>,
     pub difficulty: Option<i32>,
     pub is_experimental: bool,
 }
