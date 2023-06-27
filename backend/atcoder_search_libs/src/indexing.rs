@@ -120,9 +120,7 @@ impl DocumentUploader {
 impl PostDocument for DocumentUploader {}
 
 #[async_trait]
-pub trait GenerateDocument: ReadRows {
-    type Reader: ReadRows + Sync + Send + 'static;
-
+pub trait GenerateDocument: ReadRows + 'static {
     async fn clean(&self, save_dir: &Path) -> Result<()> {
         let mut files = tokio::fs::read_dir(save_dir).await?;
 
@@ -145,14 +143,14 @@ pub trait GenerateDocument: ReadRows {
         chunk_size: usize,
     ) -> Result<()> {
         let (tx, mut rx): (
-            Sender<<<Self::Reader as ReadRows>::Row as ToDocument>::Document>,
-            Receiver<<<Self::Reader as ReadRows>::Row as ToDocument>::Document>,
+            Sender<<<Self as ReadRows>::Row as ToDocument>::Document>,
+            Receiver<<<Self as ReadRows>::Row as ToDocument>::Document>,
         ) = tokio::sync::mpsc::channel(2 * chunk_size);
 
         let save_dir: PathBuf = save_dir.to_owned();
         let saver = tokio::task::spawn_blocking(move || {
             let mut suffix: u32 = 0;
-            let mut documents: Vec<<<Self::Reader as ReadRows>::Row as ToDocument>::Document> =
+            let mut documents: Vec<<<Self as ReadRows>::Row as ToDocument>::Document> =
                 Vec::with_capacity(chunk_size);
 
             while let Some(document) = rx.blocking_recv() {
@@ -206,11 +204,11 @@ pub trait GenerateDocument: ReadRows {
         });
 
         let (row_tx, mut row_rx): (
-            Sender<<Self::Reader as ReadRows>::Row>,
-            Receiver<<Self::Reader as ReadRows>::Row>,
+            Sender<<Self as ReadRows>::Row>,
+            Receiver<<Self as ReadRows>::Row>,
         ) = tokio::sync::mpsc::channel(2 * chunk_size);
 
-        let reader = tokio::task::spawn(Self::Reader::read_rows(pool, row_tx));
+        let reader = tokio::task::spawn(Self::read_rows(pool, row_tx));
 
         let mut tasks: FuturesUnordered<JoinHandle<()>> = FuturesUnordered::new();
         while let Some(row) = row_rx.recv().await {

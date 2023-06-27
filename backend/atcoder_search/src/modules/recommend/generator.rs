@@ -111,6 +111,4 @@ impl ReadRows for RecommendDocumentGenerator {
 }
 
 #[async_trait]
-impl GenerateDocument for RecommendDocumentGenerator {
-    type Reader = Self;
-}
+impl GenerateDocument for RecommendDocumentGenerator {}

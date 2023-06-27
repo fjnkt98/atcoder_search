@@ -146,6 +146,4 @@ impl ReadRows for UserDocumentGenerator {
 }
 
 #[async_trait]
-impl GenerateDocument for UserDocumentGenerator {
-    type Reader = Self;
-}
+impl GenerateDocument for UserDocumentGenerator {}

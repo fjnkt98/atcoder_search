@@ -160,6 +160,4 @@ impl ReadRows for ProblemDocumentGenerator {
 }
 
 #[async_trait]
-impl GenerateDocument for ProblemDocumentGenerator {
-    type Reader = Self;
-}
+impl GenerateDocument for ProblemDocumentGenerator {}
