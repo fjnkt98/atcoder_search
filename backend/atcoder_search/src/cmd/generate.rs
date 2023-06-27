@@ -29,7 +29,7 @@ pub async fn run(args: GenerateArgs) -> Result<()> {
     })?;
 
     let pool: Pool<Postgres> = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(16)
         .connect(&database_url)
         .await
         .with_context(|| {
