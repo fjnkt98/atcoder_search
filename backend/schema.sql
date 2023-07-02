@@ -70,3 +70,13 @@ CREATE INDEX "submissions_epoch_second_index" ON "submissions" ("epoch_second");
 CREATE INDEX "submissions_problem_id_index" ON "submissions" ("problem_id");
 
 CREATE INDEX "submissions_user_id_index" ON "submissions" ("user_id");
+
+CREATE TABLE "category_relationships" (
+    "from" TEXT NOT NULL,
+    "to" TEXT NOT NULL,
+    "weight" DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY ("from", "to")
+);
+
+CREATE INDEX "category_relationships_from_index" ON "category_relationships" ("from");
+CREATE INDEX "category_relationships_to_index" ON "category_relationships" ("to");

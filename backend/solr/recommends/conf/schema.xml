@@ -39,6 +39,8 @@
   <uniqueKey>problem_id</uniqueKey>
   <field name="problem_id" type="String" indexed="true" stored="true" required="true" multiValued="false" />
   <field name="difficulty_correlation" type="DelimitedPayloadsFloat" indexed="true" stored="true" multiValued="false" />
+  <field name="category_correlation" type="DelimitedPayloadsFloat" indexed="true" stored="true" multiValued="false" />
   <field name="difficulty" type="i32" indexed="true" stored="true" multiValued="false" />
   <field name="is_experimental" type="bool" indexed="true" stored="true" multiValued="false" />
+  <field name="solved_count" type="f64" indexed="true" stored="true" multiValued="false" />
 </schema>

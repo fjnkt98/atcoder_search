@@ -1,35 +1,5 @@
 {
   "db": "PostgreSQL",
-  "2e57a7e51156e33e3ae797687383e6b42725ed1cf2dc155356e45d874781cc6e": {
-    "describe": {
-      "columns": [
-        {
-          "name": "problem_id",
-          "ordinal": 0,
-          "type_info": "Text"
-        },
-        {
-          "name": "difficulty",
-          "ordinal": 1,
-          "type_info": "Int4"
-        },
-        {
-          "name": "is_experimental",
-          "ordinal": 2,
-          "type_info": "Bool"
-        }
-      ],
-      "nullable": [
-        false,
-        true,
-        true
-      ],
-      "parameters": {
-        "Left": []
-      }
-    },
-    "query": "\n            SELECT\n                \"problems\".\"problem_id\" AS \"problem_id\",\n                \"difficulties\".\"difficulty\" AS \"difficulty\",\n                \"difficulties\".\"is_experimental\" AS \"is_experimental\"\n            FROM\n                \"problems\"\n                LEFT JOIN \"difficulties\" ON \"problems\".\"problem_id\" = \"difficulties\".\"problem_id\"\n            "
-  },
   "897c3dba83e483c7bf145219367ceca0b4bf8b0116d5e6988b6a217246f6544a": {
     "describe": {
       "columns": [
@@ -185,5 +155,81 @@
       }
     },
     "query": "\n            SELECT\n                \"problems\".\"problem_id\" AS \"problem_id\",\n                \"problems\".\"title\" AS \"problem_title\",\n                \"problems\".\"url\" AS \"problem_url\",\n                \"contests\".\"contest_id\" AS \"contest_id\",\n                \"contests\".\"title\" AS \"contest_title\",\n                \"contests\".\"start_epoch_second\" AS \"start_at\",\n                \"contests\".\"duration_second\" AS \"duration\",\n                \"contests\".\"rate_change\" AS \"rate_change\",\n                \"contests\".\"category\" AS \"category\",\n                \"problems\".\"html\" AS \"html\",\n                \"difficulties\".\"difficulty\" AS \"difficulty\",\n                \"difficulties\".\"is_experimental\" AS \"is_experimental\"\n            FROM\n                \"problems\"\n                JOIN \"contests\" ON \"problems\".\"contest_id\" = \"contests\".\"contest_id\"\n                LEFT JOIN \"difficulties\" ON \"problems\".\"problem_id\" = \"difficulties\".\"problem_id\"\n            "
+  },
+  "ac3dc326d72eb7bf6b2feeb302211fc869668eaf56288b42fb80bece3f7828c0": {
+    "describe": {
+      "columns": [
+        {
+          "name": "problem_id",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "correlation",
+          "ordinal": 1,
+          "type_info": "Float8"
+        },
+        {
+          "name": "weight",
+          "ordinal": 2,
+          "type_info": "Float8"
+        }
+      ],
+      "nullable": [
+        false,
+        null,
+        true
+      ],
+      "parameters": {
+        "Left": [
+          "Int4",
+          "Text",
+          "Text"
+        ]
+      }
+    },
+    "query": "\n            WITH \"difficulty_correlations\" AS (\n                SELECT\n                    \"problem_id\",\n                    \"contest_id\",\n                    CAST (\n                        ROUND(\n                            EXP(\n                                - POW(($1::integer - \"difficulty\"), 2.0) / 57707.8\n                            ),\n                            6\n                        ) AS DOUBLE PRECISION\n                    ) AS \"correlation\"\n\n                FROM\n                    \"problems\"\n                    LEFT JOIN \"difficulties\" USING(\"problem_id\")\n                WHERE\n                    \"problems\".\"problem_id\" <> $2::text\n                    AND \"difficulty\" IS NOT NULL\n                ORDER BY\n                    \"correlation\" DESC\n                LIMIT\n                    100\n            )\n            SELECT\n                \"problem_id\",\n                \"correlation\",\n                \"weight\"\n            FROM\n                \"difficulty_correlations\"\n            LEFT JOIN \"contests\" USING(\"contest_id\")\n            LEFT JOIN (SELECT \"to\", \"weight\" FROM \"category_relationships\" WHERE \"from\" = $3::text) AS \"relations\" ON \"contests\".\"category\" = \"relations\".\"to\"\n            "
+  },
+  "d6301c6c0dd1fa0111149b3f8759d9d00535f50b3656c31881b459074e52f5ef": {
+    "describe": {
+      "columns": [
+        {
+          "name": "problem_id",
+          "ordinal": 0,
+          "type_info": "Text"
+        },
+        {
+          "name": "category",
+          "ordinal": 1,
+          "type_info": "Text"
+        },
+        {
+          "name": "difficulty",
+          "ordinal": 2,
+          "type_info": "Int4"
+        },
+        {
+          "name": "is_experimental",
+          "ordinal": 3,
+          "type_info": "Bool"
+        },
+        {
+          "name": "solved_count",
+          "ordinal": 4,
+          "type_info": "Float8"
+        }
+      ],
+      "nullable": [
+        true,
+        true,
+        true,
+        true,
+        null
+      ],
+      "parameters": {
+        "Left": []
+      }
+    },
+    "query": "\n            WITH \"solved_counts\" AS (\n                SELECT\n                    \"problem_id\",\n                    COUNT(1) AS \"solved_count\"\n                FROM\n                    \"submissions\"\n                WHERE\n                    \"result\" = 'AC'\n                GROUP BY\n                    \"problem_id\"\n            ),\n            \"denominators\" AS (\n                SELECT\n                    MAX(\"solved_count\") AS \"denominator\"\n                FROM\n                    \"solved_counts\"\n                WHERE\n                    \"solved_count\" > 0\n            )\n            SELECT\n                \"problems\".\"problem_id\" AS \"problem_id\",\n                \"contests\".\"category\" AS \"category\",\n                \"difficulties\".\"difficulty\" AS \"difficulty\",\n                \"difficulties\".\"is_experimental\" AS \"is_experimental\",\n                CAST(\"solved_count\" AS DOUBLE PRECISION) / (SELECT \"denominator\" FROM \"denominators\") AS \"solved_count\"\n            FROM\n                \"problems\"\n                LEFT JOIN \"difficulties\" ON \"problems\".\"problem_id\" = \"difficulties\".\"problem_id\"\n                LEFT JOIN \"contests\" ON \"problems\".\"contest_id\" = \"contests\".\"contest_id\"\n                LEFT JOIN \"solved_counts\" ON \"problems\".\"problem_id\" = \"solved_counts\".\"problem_id\"\n            WHERE\n                \"difficulty\" IS NOT NULL\n            "
   }
 }

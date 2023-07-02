@@ -1,0 +1,92 @@
+from,to,weight
+ABC,ABC,1.0
+ABC,ARC,0.8
+ABC,AGC,0.6
+ABC,AHC,0.0
+ABC,ABC-Like,0.9
+ABC,ARC-Like,0.7
+ABC,AGC-Like,0.5
+ABC,PAST,0.8
+ABC,JOI,0.8
+ABC,JAG,0.8
+ABC,Marathon,0.0
+ABC,Other Sponsored,0.8
+ABC,Other Contests,0.8
+ARC,ARC,1.0
+ARC,AGC,0.8
+ARC,AHC,0.0
+ARC,ABC-Like,0.5
+ARC,ARC-Like,0.9
+ARC,AGC-Like,0.7
+ARC,PAST,0.8
+ARC,JOI,0.8
+ARC,JAG,0.8
+ARC,Marathon,0.0
+ARC,Other Sponsored,0.8
+ARC,Other Contests,0.8
+AGC,AGC,1.0
+AGC,AHC,0.0
+AGC,ABC-Like,0.5
+AGC,ARC-Like,0.7
+AGC,AGC-Like,0.9
+AGC,PAST,0.8
+AGC,JOI,0.8
+AGC,JAG,0.8
+AGC,Marathon,0.0
+AGC,Other Sponsored,0.8
+AGC,Other Contests,0.8
+AHC,AHC,1.0
+AHC,ABC-Like,0.0
+AHC,ARC-Like,0.0
+AHC,AGC-Like,0.0
+AHC,PAST,0.0
+AHC,JOI,0.0
+AHC,JAG,0.0
+AHC,Marathon,1.0
+AHC,Other Sponsored,0.0
+AHC,Other Contests,0.0
+ABC-Like,ABC-Like,1.0
+ABC-Like,ARC-Like,0.7
+ABC-Like,AGC-Like,0.5
+ABC-Like,PAST,0.8
+ABC-Like,JOI,0.8
+ABC-Like,JAG,0.8
+ABC-Like,Marathon,0.0
+ABC-Like,Other Sponsored,0.7
+ABC-Like,Other Contests,0.7
+ARC-Like,ARC-Like,1.0
+ARC-Like,AGC-Like,0.7
+ARC-Like,PAST,0.8
+ARC-Like,JOI,0.8
+ARC-Like,JAG,0.8
+ARC-Like,Marathon,0.0
+ARC-Like,Other Sponsored,0.8
+ARC-Like,Other Contests,0.8
+AGC-Like,AGC-Like,1.0
+AGC-Like,PAST,0.8
+AGC-Like,JOI,0.8
+AGC-Like,JAG,0.8
+AGC-Like,Marathon,0.0
+AGC-Like,Other Sponsored,0.8
+AGC-Like,Other Contests,0.8
+PAST,PAST,1.0
+PAST,JOI,0.8
+PAST,JAG,0.8
+PAST,Marathon,0.0
+PAST,Other Sponsored,0.8
+PAST,Other Contests,0.8
+JOI,JOI,1.0
+JOI,JAG,0.8
+JOI,Marathon,0.0
+JOI,Other Sponsored,0.8
+JOI,Other Contests,0.8
+JAG,JAG,1.0
+JAG,Marathon,0.0
+JAG,Other Sponsored,0.8
+JAG,Other Contests,0.8
+Marathon,Marathon,1.0
+Marathon,Other Sponsored,0.0
+Marathon,Other Contests,0.0
+Other Sponsored,Other Sponsored,1.0
+Other Sponsored,Other Contests,1.0
+Other Contests,Other Contests,1.0
